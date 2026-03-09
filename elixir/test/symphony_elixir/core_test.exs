@@ -372,6 +372,42 @@ defmodule SymphonyElixir.CoreTest do
     assert updated_entry.issue.state == "In Progress"
   end
 
+  test "reconcile stops running issue when tracker refresh omits it" do
+    issue_id = "issue-missing"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: "MT-560",
+          issue: %Issue{
+            id: issue_id,
+            identifier: "MT-560",
+            state: "In Progress"
+          },
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    updated_state = Orchestrator.reconcile_issue_states_for_test([], state)
+
+    refute Map.has_key?(updated_state.running, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Process.alive?(agent_pid)
+  end
+
   test "reconcile stops running issue when it is reassigned away from this worker" do
     issue_id = "issue-reassigned"
 
@@ -1696,6 +1732,86 @@ defmodule SymphonyElixir.CoreTest do
     }
 
     refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.3 / §17.4 — Global slot exhaustion defers candidates
+  # ---------------------------------------------------------------------------
+
+  test "global slot exhaustion defers candidate to next tick" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      max_concurrent_agents: 1,
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    candidate_issue = %Issue{
+      id: "slot-exhaust-2",
+      identifier: "MT-910",
+      title: "Second issue when slots full",
+      description: "Should be deferred",
+      state: "In Progress",
+      labels: [],
+      blocked_by: []
+    }
+
+    state = %Orchestrator.State{
+      running: %{
+        "slot-exhaust-1" => %{
+          pid: self(),
+          ref: nil,
+          identifier: "MT-909",
+          issue: %Issue{id: "slot-exhaust-1", identifier: "MT-909", state: "In Progress"},
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new(["slot-exhaust-1"]),
+      max_concurrent_agents: 1,
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §7.1 / §17.4 — Startup terminal workspace cleanup
+  # ---------------------------------------------------------------------------
+
+  test "startup terminal cleanup removes workspaces for issues in terminal states" do
+    workspace_root = Path.join(System.tmp_dir!(), "symphony-terminal-cleanup-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(workspace_root)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: workspace_root,
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    # Create workspace directories for terminal issues
+    terminal_workspace = Path.join(workspace_root, "MT-800")
+    File.mkdir_p!(terminal_workspace)
+    File.write!(Path.join(terminal_workspace, "marker.txt"), "should be cleaned")
+
+    assert File.dir?(terminal_workspace)
+
+    # Seed memory tracker with a terminal issue matching the workspace
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      %Issue{
+        id: "terminal-1",
+        identifier: "MT-800",
+        title: "Already closed",
+        description: "Terminal issue",
+        state: "Closed",
+        labels: []
+      }
+    ])
+
+    Orchestrator.run_terminal_workspace_cleanup_for_test()
+
+    refute File.dir?(terminal_workspace),
+           "Expected workspace for terminal issue MT-800 to be cleaned up at startup"
+  after
+    Application.delete_env(:symphony_elixir, :memory_tracker_issues)
   end
 
   # ---------------------------------------------------------------------------

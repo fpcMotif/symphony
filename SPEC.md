@@ -575,6 +575,8 @@ This section is intentionally redundant so a coding agent can implement the conf
 - `codex.turn_timeout_ms`: integer, default `3600000`
 - `codex.read_timeout_ms`: integer, default `5000`
 - `codex.stall_timeout_ms`: integer, default `300000`
+- `codex.linear_graphql_enabled`: boolean, default `true`; when `false`, the optional
+  `linear_graphql` client-side tool must not be advertised or accepted
 - `server.port` (extension): integer, optional; enables the optional HTTP server, `0` may be used
   for ephemeral local bind, and CLI `--port` overrides it
 
@@ -778,6 +780,7 @@ Part B: Tracker state refresh
   - If tracker state is terminal: terminate worker and clean workspace.
   - If tracker state is still active: update the in-memory issue snapshot.
   - If tracker state is neither active nor terminal: terminate worker without workspace cleanup.
+  - If the refresh call succeeds but omits a previously running issue ID: treat that issue as no longer active, terminate the worker, and release the claim without workspace cleanup.
 - If state refresh fails, keep workers running and try again on the next tick.
 
 ### 8.6 Startup Terminal Workspace Cleanup
@@ -816,10 +819,11 @@ Algorithm summary:
 
 1. Sanitize identifier to `workspace_key`.
 2. Compute workspace path under workspace root.
-3. Ensure the workspace path exists as a directory.
-4. Mark `created_now=true` only if the directory was created during this call; otherwise
+3. If the workspace path already exists and is not a directory, fail with a typed workspace error.
+4. Otherwise ensure the workspace path exists as a directory.
+5. Mark `created_now=true` only if the directory was created during this call; otherwise
    `created_now=false`.
-5. If `created_now=true`, run `after_create` hook if configured.
+6. If `created_now=true`, run `after_create` hook if configured.
 
 Notes:
 
@@ -1061,7 +1065,7 @@ Optional client-side tool extension:
 
 - Purpose: execute a raw GraphQL query or mutation against Linear using Symphony's configured
   tracker auth for the current session.
-- Availability: only meaningful when `tracker.kind == "linear"` and valid Linear auth is configured.
+- Availability: only meaningful when `codex.linear_graphql_enabled == true`, `tracker.kind == "linear"`, and valid Linear auth is configured.
 - Preferred input shape:
 
   ```json
@@ -1956,8 +1960,8 @@ Unless otherwise noted, Sections 17.1 through 17.7 are `Core Conformance`. Bulle
 - Deterministic workspace path per issue identifier
 - Missing workspace directory is created
 - Existing workspace directory is reused
-- Existing non-directory path at workspace location is handled safely (replace or fail per
-  implementation policy)
+- Existing non-directory path at workspace location fails with a typed workspace error and does
+  not delete the pre-existing path
 - Optional workspace population/synchronization errors are surfaced
 - Temporary artifacts (`tmp`, `.elixir_ls`) are removed during prep
 - `after_create` hook runs only on new workspace creation

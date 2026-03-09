@@ -32,6 +32,7 @@ codex:
   command: codex --config shell_environment_policy.inherit=all --config model_reasoning_effort=xhigh --model gpt-5.3-codex app-server
   approval_policy: never
   thread_sandbox: workspace-write
+  linear_graphql_enabled: true
   turn_sandbox_policy:
     type: workspaceWrite
 ---
@@ -71,7 +72,7 @@ Work only in the provided repository copy. Do not touch any other path.
 
 ## Prerequisite: Linear MCP or `linear_graphql` tool is available
 
-The agent should be able to talk to Linear, either via a configured Linear MCP server or injected `linear_graphql` tool. If none are present, stop and ask the user to configure Linear.
+The agent should be able to talk to Linear, either via a configured Linear MCP server or injected `linear_graphql` tool. If `codex.linear_graphql_enabled` is `false`, the tool will not be advertised. If none are present, stop and ask the user to configure Linear.
 
 ## Default posture
 

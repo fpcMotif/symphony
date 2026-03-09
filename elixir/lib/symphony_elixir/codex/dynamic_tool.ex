@@ -3,7 +3,7 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   Executes client-side tool calls requested by Codex app-server turns.
   """
 
-  alias SymphonyElixir.Linear.Client
+  alias SymphonyElixir.{Config, Linear.Client}
 
   @linear_graphql_tool "linear_graphql"
   @linear_graphql_description """
@@ -30,27 +30,30 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   def execute(tool, arguments, opts \\ []) do
     case tool do
       @linear_graphql_tool ->
-        execute_linear_graphql(arguments, opts)
+        if linear_graphql_disabled?(opts) do
+          unsupported_tool_response(tool, opts)
+        else
+          execute_linear_graphql(arguments, opts)
+        end
 
       other ->
-        failure_response(%{
-          "error" => %{
-            "message" => "Unsupported dynamic tool: #{inspect(other)}.",
-            "supportedTools" => supported_tool_names()
-          }
-        })
+        unsupported_tool_response(other, opts)
     end
   end
 
-  @spec tool_specs() :: [map()]
-  def tool_specs do
-    [
-      %{
-        "name" => @linear_graphql_tool,
-        "description" => @linear_graphql_description,
-        "inputSchema" => @linear_graphql_input_schema
-      }
-    ]
+  @spec tool_specs(keyword()) :: [map()]
+  def tool_specs(opts \\ []) do
+    if linear_graphql_advertised?(opts) do
+      [
+        %{
+          "name" => @linear_graphql_tool,
+          "description" => @linear_graphql_description,
+          "inputSchema" => @linear_graphql_input_schema
+        }
+      ]
+    else
+      []
+    end
   end
 
   defp execute_linear_graphql(arguments, opts) do
@@ -66,9 +69,8 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   end
 
   defp normalize_linear_graphql_arguments(arguments) when is_binary(arguments) do
-    case String.trim(arguments) do
-      "" -> {:error, :missing_query}
-      query -> {:ok, query, %{}}
+    with {:ok, query} <- normalize_query_string(arguments) do
+      {:ok, query, %{}}
     end
   end
 
@@ -93,13 +95,20 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   defp normalize_query(arguments) do
     case Map.get(arguments, "query") || Map.get(arguments, :query) do
       query when is_binary(query) ->
-        case String.trim(query) do
-          "" -> {:error, :missing_query}
-          trimmed -> {:ok, trimmed}
-        end
+        normalize_query_string(query)
 
       _ ->
         {:error, :missing_query}
+    end
+  end
+
+  defp normalize_query_string(query) when is_binary(query) do
+    case String.trim(query) do
+      "" ->
+        {:error, :missing_query}
+
+      trimmed ->
+        validate_single_graphql_operation(trimmed)
     end
   end
 
@@ -107,6 +116,38 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     case Map.get(arguments, "variables") || Map.get(arguments, :variables) || %{} do
       variables when is_map(variables) -> {:ok, variables}
       _ -> {:error, :invalid_variables}
+    end
+  end
+
+  defp validate_single_graphql_operation(query) when is_binary(query) do
+    operation_count =
+      query
+      |> sanitize_graphql_document()
+      |> count_graphql_operations()
+
+    if operation_count <= 1 do
+      {:ok, query}
+    else
+      {:error, :multiple_operations}
+    end
+  end
+
+  defp sanitize_graphql_document(query) when is_binary(query) do
+    query
+    |> Regex.replace(~r/""".*?"""/s, "")
+    |> Regex.replace(~r/"(?:\\.|[^"\\])*"/s, "")
+    |> Regex.replace(~r/#.*$/m, "")
+  end
+
+  defp count_graphql_operations(query) when is_binary(query) do
+    explicit_operations =
+      Regex.scan(~r/(?:^\s*|}\s*)(?:query|mutation|subscription)\b/s, query)
+      |> length()
+
+    if explicit_operations > 0 do
+      explicit_operations
+    else
+      if String.starts_with?(String.trim_leading(query), "{"), do: 1, else: 0
     end
   end
 
@@ -141,6 +182,15 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     }
   end
 
+  defp unsupported_tool_response(tool, opts) do
+    failure_response(%{
+      "error" => %{
+        "message" => "Unsupported dynamic tool: #{inspect(tool)}.",
+        "supportedTools" => supported_tool_names(opts)
+      }
+    })
+  end
+
   defp encode_payload(payload) when is_map(payload) or is_list(payload) do
     Jason.encode!(payload, pretty: true)
   end
@@ -167,6 +217,14 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     %{
       "error" => %{
         "message" => "`linear_graphql.variables` must be a JSON object when provided."
+      }
+    }
+  end
+
+  defp tool_error_payload(:multiple_operations) do
+    %{
+      "error" => %{
+        "message" => "`linear_graphql.query` must contain exactly one GraphQL operation."
       }
     }
   end
@@ -206,7 +264,25 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     }
   end
 
-  defp supported_tool_names do
-    Enum.map(tool_specs(), & &1["name"])
+  defp linear_graphql_disabled?(opts) when is_list(opts) do
+    case Keyword.fetch(opts, :linear_graphql_enabled) do
+      {:ok, value} -> value == false
+      :error -> not Config.codex_linear_graphql_enabled?()
+    end
+  end
+
+  defp linear_graphql_advertised?(opts) when is_list(opts) do
+    case Keyword.fetch(opts, :linear_graphql_enabled) do
+      {:ok, value} -> value == true and linear_graphql_configured?()
+      :error -> Config.codex_linear_graphql_enabled?() and linear_graphql_configured?()
+    end
+  end
+
+  defp linear_graphql_configured? do
+    Config.tracker_kind() == "linear" and is_binary(Config.linear_api_token())
+  end
+
+  defp supported_tool_names(opts) do
+    Enum.map(tool_specs(opts), & &1["name"])
   end
 end

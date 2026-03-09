@@ -20,8 +20,9 @@ This directory contains the current Elixir/OTP implementation of Symphony, based
 4. Sends a workflow prompt to Codex
 5. Keeps Codex working on the issue until the work is done
 
-During app-server sessions, Symphony also serves a client-side `linear_graphql` tool so that repo
-skills can make raw Linear GraphQL calls.
+During app-server sessions, Symphony can also serve a client-side `linear_graphql` tool so that
+repo skills can make raw Linear GraphQL calls when `codex.linear_graphql_enabled` is `true`,
+`tracker.kind` is `linear`, and valid Linear auth is configured.
 
 If a claimed issue moves to a terminal state (`Done`, `Closed`, `Cancelled`, or `Duplicate`),
 Symphony stops the active agent for that issue and cleans up matching workspaces.
@@ -100,6 +101,7 @@ agent:
   max_turns: 20
 codex:
   command: codex app-server
+  linear_graphql_enabled: true
 ---
 
 You are working on a Linear issue {{ issue.identifier }}.
@@ -120,6 +122,9 @@ Notes:
   `externalSandbox`, `workspaceWrite`.
 - `agent.max_turns` caps how many back-to-back Codex turns Symphony will run in a single agent
   invocation when a turn completes normally but the issue is still in an active state. Default: `20`.
+- `codex.linear_graphql_enabled` defaults to `true`. When `true`, Symphony advertises the optional
+  `linear_graphql` tool only if `tracker.kind` is `linear` and valid Linear auth is configured.
+  When `false`, the tool is neither advertised nor accepted.
 - If the Markdown body is blank, Symphony uses a default prompt template that includes the issue
   identifier, title, and body.
 - Use `hooks.after_create` to bootstrap a fresh workspace. For a Git-backed repo, you can run
@@ -142,6 +147,7 @@ hooks:
     git clone --depth 1 "$SOURCE_REPO_URL" .
 codex:
   command: "$CODEX_BIN app-server --model gpt-5.3-codex"
+  linear_graphql_enabled: true
 ```
 
 - If `WORKFLOW.md` is missing or has invalid YAML, startup and scheduling are halted until fixed.

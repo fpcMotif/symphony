@@ -11,6 +11,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   @turn_start_id 3
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
+  @stderr_stream_prefix "__SYMPHONY_STDERR__:"
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
 
   @type session :: %{
@@ -171,8 +172,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           [
             :binary,
             :exit_status,
-            :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.codex_command())],
+            args: [~c"-lc", String.to_charlist(wrap_codex_command(Config.codex_command()))],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]
@@ -180,6 +180,10 @@ defmodule SymphonyElixir.Codex.AppServer do
 
       {:ok, port}
     end
+  end
+
+  defp wrap_codex_command(command) when is_binary(command) do
+    "{ #{command}; } 2> >(while IFS= read -r line; do printf '%s%s\\n' '#{@stderr_stream_prefix}' \"$line\"; done)"
   end
 
   defp port_metadata(port) when is_port(port) do
@@ -307,75 +311,81 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests) do
     payload_string = to_string(data)
 
-    case Jason.decode(payload_string) do
-      {:ok, %{"method" => "turn/completed"} = payload} ->
-        emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
-        {:ok, :turn_completed}
+    if String.starts_with?(payload_string, @stderr_stream_prefix) do
+      stderr_text = String.replace_prefix(payload_string, @stderr_stream_prefix, "")
+      log_non_json_stream_line(stderr_text, "stderr")
+      receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+    else
+      case Jason.decode(payload_string) do
+        {:ok, %{"method" => "turn/completed"} = payload} ->
+          emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
+          {:ok, :turn_completed}
 
-      {:ok, %{"method" => "turn/failed", "params" => _} = payload} ->
-        emit_turn_event(
-          on_message,
-          :turn_failed,
-          payload,
-          payload_string,
-          port,
-          Map.get(payload, "params")
-        )
+        {:ok, %{"method" => "turn/failed", "params" => _} = payload} ->
+          emit_turn_event(
+            on_message,
+            :turn_failed,
+            payload,
+            payload_string,
+            port,
+            Map.get(payload, "params")
+          )
 
-        {:error, {:turn_failed, Map.get(payload, "params")}}
+          {:error, {:turn_failed, Map.get(payload, "params")}}
 
-      {:ok, %{"method" => "turn/cancelled", "params" => _} = payload} ->
-        emit_turn_event(
-          on_message,
-          :turn_cancelled,
-          payload,
-          payload_string,
-          port,
-          Map.get(payload, "params")
-        )
+        {:ok, %{"method" => "turn/cancelled", "params" => _} = payload} ->
+          emit_turn_event(
+            on_message,
+            :turn_cancelled,
+            payload,
+            payload_string,
+            port,
+            Map.get(payload, "params")
+          )
 
-        {:error, {:turn_cancelled, Map.get(payload, "params")}}
+          {:error, {:turn_cancelled, Map.get(payload, "params")}}
 
-      {:ok, %{"method" => method} = payload}
-      when is_binary(method) ->
-        handle_turn_method(
-          port,
-          on_message,
-          payload,
-          payload_string,
-          method,
-          timeout_ms,
-          tool_executor,
-          auto_approve_requests
-        )
+        {:ok, %{"method" => method} = payload}
+        when is_binary(method) ->
+          handle_turn_method(
+            port,
+            on_message,
+            payload,
+            payload_string,
+            method,
+            timeout_ms,
+            tool_executor,
+            auto_approve_requests
+          )
 
-      {:ok, payload} ->
-        emit_message(
-          on_message,
-          :other_message,
-          %{
-            payload: payload,
-            raw: payload_string
-          },
-          metadata_from_message(port, payload)
-        )
+        {:ok, payload} ->
+          emit_message(
+            on_message,
+            :other_message,
+            %{
+              payload: payload,
+              raw: payload_string
+            },
+            metadata_from_message(port, payload)
+          )
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
 
-      {:error, _reason} ->
-        log_non_json_stream_line(payload_string, "turn stream")
+        {:error, _reason} ->
+          log_non_json_stream_line(payload_string, "turn stream")
 
-        emit_message(
-          on_message,
-          :malformed,
-          %{
-            payload: payload_string,
-            raw: payload_string
-          },
-          metadata_from_message(port, %{raw: payload_string})
-        )
+          emit_message(
+            on_message,
+            :malformed,
+            %{
+              payload: payload_string,
+              raw: payload_string
+            },
+            metadata_from_message(port, %{raw: payload_string})
+          )
 
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+      end
     end
   end
 
@@ -585,25 +595,16 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
+         _port,
          "item/tool/requestUserInput",
-         %{"id" => id, "params" => params} = payload,
-         payload_string,
-         on_message,
-         metadata,
+         %{"id" => _id, "params" => _params} = _payload,
+         _payload_string,
+         _on_message,
+         _metadata,
          _tool_executor,
-         auto_approve_requests
+         _auto_approve_requests
        ) do
-    maybe_auto_answer_tool_request_user_input(
-      port,
-      id,
-      params,
-      payload,
-      payload_string,
-      on_message,
-      metadata,
-      auto_approve_requests
-    )
+    :input_required
   end
 
   defp maybe_handle_approval_request(
@@ -843,23 +844,31 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp handle_response(port, request_id, data, timeout_ms) do
     payload = to_string(data)
 
-    case Jason.decode(payload) do
-      {:ok, %{"id" => ^request_id, "error" => error}} ->
-        {:error, {:response_error, error}}
+    if String.starts_with?(payload, @stderr_stream_prefix) do
+      payload
+      |> String.replace_prefix(@stderr_stream_prefix, "")
+      |> log_non_json_stream_line("stderr")
 
-      {:ok, %{"id" => ^request_id, "result" => result}} ->
-        {:ok, result}
+      with_timeout_response(port, request_id, timeout_ms, "")
+    else
+      case Jason.decode(payload) do
+        {:ok, %{"id" => ^request_id, "error" => error}} ->
+          {:error, {:response_error, error}}
 
-      {:ok, %{"id" => ^request_id} = response_payload} ->
-        {:error, {:response_error, response_payload}}
+        {:ok, %{"id" => ^request_id, "result" => result}} ->
+          {:ok, result}
 
-      {:ok, %{} = other} ->
-        Logger.debug("Ignoring message while waiting for response: #{inspect(other)}")
-        with_timeout_response(port, request_id, timeout_ms, "")
+        {:ok, %{"id" => ^request_id} = response_payload} ->
+          {:error, {:response_error, response_payload}}
 
-      {:error, _} ->
-        log_non_json_stream_line(payload, "response stream")
-        with_timeout_response(port, request_id, timeout_ms, "")
+        {:ok, %{} = other} ->
+          Logger.debug("Ignoring message while waiting for response: #{inspect(other)}")
+          with_timeout_response(port, request_id, timeout_ms, "")
+
+        {:error, _} ->
+          log_non_json_stream_line(payload, "response stream")
+          with_timeout_response(port, request_id, timeout_ms, "")
+      end
     end
   end
 

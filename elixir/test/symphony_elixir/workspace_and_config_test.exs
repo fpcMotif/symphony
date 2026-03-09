@@ -89,7 +89,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     end
   end
 
-  test "workspace replaces stale non-directory paths" do
+  test "workspace rejects stale non-directory paths with a typed error" do
     workspace_root =
       Path.join(
         System.tmp_dir!(),
@@ -103,9 +103,11 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
       write_workflow_file!(Workflow.workflow_file_path(), workspace_root: workspace_root)
 
-      assert {:ok, workspace} = Workspace.create_for_issue("MT-STALE")
-      assert workspace == stale_workspace
-      assert File.dir?(workspace)
+      assert {:error, {:workspace_path_not_directory, ^stale_workspace}} =
+               Workspace.create_for_issue("MT-STALE")
+
+      refute File.dir?(stale_workspace)
+      assert File.read!(stale_workspace) == "old state\n"
     after
       File.rm_rf(workspace_root)
     end
@@ -651,6 +653,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       codex_turn_timeout_ms: nil,
       codex_read_timeout_ms: nil,
       codex_stall_timeout_ms: nil,
+      codex_linear_graphql_enabled: nil,
       tracker_api_token: nil,
       tracker_project_slug: nil
     )
@@ -684,6 +687,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert Config.codex_turn_timeout_ms() == 3_600_000
     assert Config.codex_read_timeout_ms() == 5_000
     assert Config.codex_stall_timeout_ms() == 300_000
+    assert Config.codex_linear_graphql_enabled?()
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_command: "codex app-server --model gpt-5.3-codex")
     assert Config.codex_command() == "codex app-server --model gpt-5.3-codex"
@@ -716,6 +720,12 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_stall_timeout_ms: "bad")
     assert Config.codex_stall_timeout_ms() == 300_000
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: false)
+    refute Config.codex_linear_graphql_enabled?()
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "bad")
+    assert Config.codex_linear_graphql_enabled?()
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: %{todo: true},

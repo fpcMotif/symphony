@@ -297,15 +297,27 @@ defmodule SymphonyElixir.Orchestrator do
     sort_issues_for_dispatch(issues)
   end
 
-  defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
+  @doc false
+  @spec run_terminal_workspace_cleanup_for_test() :: :ok
+  def run_terminal_workspace_cleanup_for_test do
+    run_terminal_workspace_cleanup()
+    :ok
+  end
 
-  defp reconcile_running_issue_states([issue | rest], state, active_states, terminal_states) do
-    reconcile_running_issue_states(
-      rest,
-      reconcile_issue_state(issue, state, active_states, terminal_states),
-      active_states,
-      terminal_states
-    )
+  defp reconcile_running_issue_states(issues, state, active_states, terminal_states)
+       when is_list(issues) do
+    seen_issue_ids =
+      issues
+      |> Enum.reduce(MapSet.new(), fn
+        %Issue{id: issue_id}, acc when is_binary(issue_id) -> MapSet.put(acc, issue_id)
+        _issue, acc -> acc
+      end)
+
+    issues
+    |> Enum.reduce(state, fn issue, state_acc ->
+      reconcile_issue_state(issue, state_acc, active_states, terminal_states)
+    end)
+    |> terminate_missing_refreshed_issues(seen_issue_ids)
   end
 
   defp reconcile_issue_state(%Issue{} = issue, state, active_states, terminal_states) do
@@ -371,6 +383,30 @@ defmodule SymphonyElixir.Orchestrator do
 
       _ ->
         release_issue_claim(state, issue_id)
+    end
+  end
+
+  defp terminate_missing_refreshed_issues(%State{} = state, seen_issue_ids) do
+    Enum.reduce(Map.keys(state.running), state, fn issue_id, state_acc ->
+      if MapSet.member?(seen_issue_ids, issue_id) do
+        state_acc
+      else
+        log_missing_refreshed_issue(state_acc, issue_id)
+        terminate_running_issue(state_acc, issue_id, false)
+      end
+    end)
+  end
+
+  defp log_missing_refreshed_issue(%State{} = state, issue_id) do
+    case Map.get(state.running, issue_id) do
+      %{issue: %Issue{} = issue} ->
+        Logger.info("Issue missing from active-state refresh: #{issue_context(issue)}; stopping active agent")
+
+      %{identifier: identifier} when is_binary(identifier) ->
+        Logger.info("Issue missing from active-state refresh: issue_id=#{issue_id} issue_identifier=#{identifier}; stopping active agent")
+
+      _ ->
+        Logger.info("Issue missing from active-state refresh: issue_id=#{issue_id}; stopping active agent")
     end
   end
 
