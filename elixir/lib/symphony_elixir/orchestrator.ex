@@ -7,7 +7,7 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, Workspace}
+  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, WorkflowStore, Workspace}
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -173,6 +173,10 @@ defmodule SymphonyElixir.Orchestrator do
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
 
+    # SPEC §6.2: Defensively reload the workflow before dispatch in case
+    # filesystem watch events were missed between polling intervals.
+    WorkflowStore.force_reload()
+
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          true <- available_slots(state) > 0 do
@@ -279,6 +283,12 @@ defmodule SymphonyElixir.Orchestrator do
   def revalidate_issue_for_dispatch_for_test(%Issue{} = issue, issue_fetcher)
       when is_function(issue_fetcher, 1) do
     revalidate_issue_for_dispatch(issue, issue_fetcher, terminal_state_set())
+  end
+
+  @doc false
+  @spec reconcile_stalled_running_issues_for_test(term()) :: term()
+  def reconcile_stalled_running_issues_for_test(%State{} = state) do
+    reconcile_stalled_running_issues(state)
   end
 
   @doc false

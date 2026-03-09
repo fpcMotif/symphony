@@ -1527,4 +1527,196 @@ defmodule SymphonyElixir.CoreTest do
       File.rm_rf(test_root)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.2 / §17.4 — Todo blocker rule
+  # ---------------------------------------------------------------------------
+
+  test "todo issue with non-terminal blockers is not dispatched" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    blocked_issue = %Issue{
+      id: "todo-blocked",
+      identifier: "MT-900",
+      title: "Blocked by open issue",
+      description: "Should not dispatch",
+      state: "Todo",
+      labels: [],
+      blocked_by: [%{id: "blocker-1", state: "In Progress"}]
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(blocked_issue, state)
+  end
+
+  test "todo issue with all-terminal blockers is eligible for dispatch" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    unblocked_issue = %Issue{
+      id: "todo-unblocked",
+      identifier: "MT-901",
+      title: "All blockers done",
+      description: "Should dispatch",
+      state: "Todo",
+      labels: [],
+      blocked_by: [%{id: "blocker-1", state: "Closed"}, %{id: "blocker-2", state: "Done"}]
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(unblocked_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.5 / §17.4 — Stall detection
+  # ---------------------------------------------------------------------------
+
+  test "stalled running issue is terminated and retry is scheduled" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_stall_timeout_ms: 5_000
+    )
+
+    issue_id = "stall-1"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    stale_timestamp = DateTime.add(DateTime.utc_now(), -10, :second)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: "MT-902",
+          issue: %Issue{id: issue_id, identifier: "MT-902", state: "In Progress"},
+          started_at: stale_timestamp,
+          last_codex_timestamp: stale_timestamp
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    updated_state = Orchestrator.reconcile_stalled_running_issues_for_test(state)
+
+    refute Map.has_key?(updated_state.running, issue_id)
+    assert Map.has_key?(updated_state.retry_attempts, issue_id)
+    refute Process.alive?(agent_pid)
+  end
+
+  test "stall detection is skipped when stall_timeout_ms is zero" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_stall_timeout_ms: 0
+    )
+
+    issue_id = "stall-skip"
+
+    stale_timestamp = DateTime.add(DateTime.utc_now(), -600, :second)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: self(),
+          ref: nil,
+          identifier: "MT-903",
+          issue: %Issue{id: issue_id, identifier: "MT-903", state: "In Progress"},
+          started_at: stale_timestamp,
+          last_codex_timestamp: stale_timestamp
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    updated_state = Orchestrator.reconcile_stalled_running_issues_for_test(state)
+
+    assert Map.has_key?(updated_state.running, issue_id)
+    assert updated_state.retry_attempts == %{}
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.3 / §17.4 — Per-state concurrency limits
+  # ---------------------------------------------------------------------------
+
+  test "per-state concurrency limit blocks dispatch when state limit is reached" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      max_concurrent_agents: 10,
+      max_concurrent_agents_by_state: %{"todo" => 1},
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    candidate_issue = %Issue{
+      id: "per-state-2",
+      identifier: "MT-905",
+      title: "Second todo issue",
+      description: "Should be blocked by per-state limit",
+      state: "Todo",
+      labels: [],
+      blocked_by: []
+    }
+
+    state = %Orchestrator.State{
+      running: %{
+        "per-state-1" => %{
+          pid: self(),
+          ref: nil,
+          identifier: "MT-904",
+          issue: %Issue{id: "per-state-1", identifier: "MT-904", state: "Todo"},
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new(["per-state-1"]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{}
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.2 / §17.4 — Dispatch sort order
+  # ---------------------------------------------------------------------------
+
+  test "dispatch sort order: priority ascending, created_at oldest first, identifier tie-breaker" do
+    now = DateTime.utc_now()
+
+    issues = [
+      %Issue{id: "d", identifier: "MT-D", state: "Todo", title: "D", priority: nil, created_at: now},
+      %Issue{id: "a", identifier: "MT-A", state: "Todo", title: "A", priority: 1, created_at: DateTime.add(now, 10, :second)},
+      %Issue{id: "b", identifier: "MT-B", state: "Todo", title: "B", priority: 1, created_at: now},
+      %Issue{id: "c", identifier: "MT-C", state: "Todo", title: "C", priority: 3, created_at: now}
+    ]
+
+    sorted = Orchestrator.sort_issues_for_dispatch_for_test(issues)
+    sorted_ids = Enum.map(sorted, & &1.id)
+
+    # priority 1 first (B before A because B has earlier created_at),
+    # then priority 3 (C), then null priority (D sorts last)
+    assert sorted_ids == ["b", "a", "c", "d"]
+  end
 end
