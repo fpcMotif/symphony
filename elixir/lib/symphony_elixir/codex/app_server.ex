@@ -404,16 +404,26 @@ defmodule SymphonyElixir.Codex.AppServer do
        ) do
     metadata = metadata_from_message(port, payload)
 
-    case maybe_handle_approval_request(
-           port,
-           method,
-           payload,
-           payload_string,
-           on_message,
-           metadata,
-           tool_executor,
-           auto_approve_requests
-         ) do
+    approval_status =
+      maybe_handle_approval_request(
+        port,
+        method,
+        payload,
+        payload_string,
+        on_message,
+        metadata,
+        tool_executor,
+        auto_approve_requests
+      )
+
+    status =
+      if approval_status == :unhandled and needs_input?(method, payload) do
+        :input_required
+      else
+        approval_status
+      end
+
+    case status do
       :input_required ->
         emit_message(
           on_message,
@@ -423,9 +433,6 @@ defmodule SymphonyElixir.Codex.AppServer do
         )
 
         {:error, {:turn_input_required, payload}}
-
-      :approved ->
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
 
       :approval_required ->
         emit_message(
@@ -437,30 +444,22 @@ defmodule SymphonyElixir.Codex.AppServer do
 
         {:error, {:approval_required, payload}}
 
+      :approved ->
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+
       :unhandled ->
-        if needs_input?(method, payload) do
-          emit_message(
-            on_message,
-            :turn_input_required,
-            %{payload: payload, raw: payload_string},
-            metadata
-          )
+        emit_message(
+          on_message,
+          :notification,
+          %{
+            payload: payload,
+            raw: payload_string
+          },
+          metadata
+        )
 
-          {:error, {:turn_input_required, payload}}
-        else
-          emit_message(
-            on_message,
-            :notification,
-            %{
-              payload: payload,
-              raw: payload_string
-            },
-            metadata
-          )
-
-          Logger.debug("Codex notification: #{inspect(method)}")
-          receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
-        end
+        Logger.debug("Codex notification: #{inspect(method)}")
+        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
     end
   end
 
