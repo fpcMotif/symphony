@@ -102,7 +102,7 @@ defmodule SymphonyElixir.StatusDashboard do
     refresh_ms = refresh_ms_override || Config.observability_refresh_ms()
     render_interval_ms = render_interval_ms_override || Config.observability_render_interval_ms()
     render_fun = Keyword.get(opts, :render_fun, &render_to_terminal/1)
-    enabled = resolve_override(enabled_override, Config.observability_enabled?() and dashboard_enabled?())
+    enabled = resolve_override(enabled_override, Config.observability_enabled?() and ui_enabled?())
     schedule_tick(refresh_ms, enabled)
 
     {:ok,
@@ -178,7 +178,7 @@ defmodule SymphonyElixir.StatusDashboard do
   defp refresh_runtime_config(%__MODULE__{} = state) do
     %{
       state
-      | enabled: resolve_override(state.enabled_override, Config.observability_enabled?() and dashboard_enabled?()),
+      | enabled: resolve_override(state.enabled_override, Config.observability_enabled?() and ui_enabled?()),
         refresh_ms: state.refresh_ms_override || Config.observability_refresh_ms(),
         render_interval_ms: state.render_interval_ms_override || Config.observability_render_interval_ms()
     }
@@ -1928,7 +1928,7 @@ defmodule SymphonyElixir.StatusDashboard do
 
   defp truncate(value, _max), do: value
 
-  defp dashboard_enabled? do
+  defp ui_enabled? do
     if Code.ensure_loaded?(Mix) and function_exported?(Mix, :env, 0) do
       try do
         Mix.env() != :test

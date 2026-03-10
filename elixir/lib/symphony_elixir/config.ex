@@ -134,7 +134,7 @@ defmodule SymphonyElixir.Config do
                                type: :map,
                                default: %{},
                                keys: [
-                                 dashboard_enabled: [
+                                 enabled: [
                                    type: :boolean,
                                    default: @default_observability_enabled
                                  ],
@@ -332,7 +332,7 @@ defmodule SymphonyElixir.Config do
 
   @spec observability_enabled?() :: boolean()
   def observability_enabled? do
-    get_in(validated_workflow_options(), [:observability, :dashboard_enabled])
+    get_in(validated_workflow_options(), [:observability, :enabled])
   end
 
   @spec observability_refresh_ms() :: pos_integer()
@@ -507,7 +507,7 @@ defmodule SymphonyElixir.Config do
 
   defp extract_observability_options(section) do
     %{}
-    |> put_if_present(:dashboard_enabled, boolean_value(Map.get(section, "dashboard_enabled")))
+    |> put_if_present(:enabled, boolean_value(Map.get(section, "enabled")))
     |> put_if_present(:refresh_ms, integer_value(Map.get(section, "refresh_ms")))
     |> put_if_present(:render_interval_ms, integer_value(Map.get(section, "render_interval_ms")))
   end

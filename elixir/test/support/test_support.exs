@@ -238,7 +238,7 @@ defmodule SymphonyElixir.TestSupport do
   defp observability_yaml(enabled, refresh_ms, render_interval_ms) do
     [
       "observability:",
-      "  dashboard_enabled: #{yaml_value(enabled)}",
+      "  enabled: #{yaml_value(enabled)}",
       "  refresh_ms: #{yaml_value(refresh_ms)}",
       "  render_interval_ms: #{yaml_value(render_interval_ms)}"
     ]
