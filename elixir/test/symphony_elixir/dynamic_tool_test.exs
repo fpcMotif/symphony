@@ -277,7 +277,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
       DynamicTool.execute(
         "linear_graphql",
         %{"query" => "query Viewer { viewer { id } }"},
-        linear_client: fn _query, _variables, _opts -> {:error, :missing_linear_api_token} end
+        linear_client: fn _query, _variables, _opts -> {:error, :missing_tracker_api_token} end
       )
 
     assert missing_token["success"] == false

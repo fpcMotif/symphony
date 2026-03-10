@@ -12,9 +12,9 @@ defmodule SymphonyElixir.CoreTest do
     )
 
     assert Config.poll_interval_ms() == 30_000
-    assert Config.linear_active_states() == ["Todo", "In Progress"]
-    assert Config.linear_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
-    assert Config.linear_assignee() == nil
+    assert Config.tracker_active_states() == ["Todo", "In Progress"]
+    assert Config.tracker_terminal_states() == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    assert Config.tracker_assignee() == nil
     assert Config.agent_max_turns() == 20
 
     write_workflow_file!(Workflow.workflow_file_path(), poll_interval_ms: "invalid")
@@ -30,14 +30,14 @@ defmodule SymphonyElixir.CoreTest do
     assert Config.agent_max_turns() == 5
 
     write_workflow_file!(Workflow.workflow_file_path(), tracker_active_states: "Todo,  Review,")
-    assert Config.linear_active_states() == ["Todo", "Review"]
+    assert Config.tracker_active_states() == ["Todo", "Review"]
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_api_token: "token",
       tracker_project_slug: nil
     )
 
-    assert {:error, :missing_linear_project_slug} = Config.validate!()
+    assert {:error, :missing_tracker_project_slug} = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_project_slug: "project",
@@ -111,16 +111,16 @@ defmodule SymphonyElixir.CoreTest do
       codex_command: "/bin/sh app-server"
     )
 
-    assert Config.linear_api_token() == env_api_key
-    assert Config.linear_project_slug() == "project"
+    assert Config.tracker_api_token() == env_api_key
+    assert Config.tracker_project_slug() == "project"
     assert :ok = Config.validate!()
   end
 
   test "linear assignee resolves from LINEAR_ASSIGNEE env var" do
-    previous_linear_assignee = System.get_env("LINEAR_ASSIGNEE")
+    previous_tracker_assignee = System.get_env("LINEAR_ASSIGNEE")
     env_assignee = "dev@example.com"
 
-    on_exit(fn -> restore_env("LINEAR_ASSIGNEE", previous_linear_assignee) end)
+    on_exit(fn -> restore_env("LINEAR_ASSIGNEE", previous_tracker_assignee) end)
     System.put_env("LINEAR_ASSIGNEE", env_assignee)
 
     write_workflow_file!(Workflow.workflow_file_path(),
@@ -129,7 +129,7 @@ defmodule SymphonyElixir.CoreTest do
       codex_command: "/bin/sh app-server"
     )
 
-    assert Config.linear_assignee() == env_assignee
+    assert Config.tracker_assignee() == env_assignee
   end
 
   test "workflow file path defaults to WORKFLOW.md in the current working directory when app env is unset" do

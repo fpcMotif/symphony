@@ -40,6 +40,8 @@ defmodule SymphonyElixir.Tracker do
   def adapter do
     case Config.tracker_kind() do
       "memory" -> SymphonyElixir.Tracker.Memory
+      "linear" -> SymphonyElixir.Linear.Adapter
+      other when is_binary(other) -> Module.concat([other])
       _ -> SymphonyElixir.Linear.Adapter
     end
   end

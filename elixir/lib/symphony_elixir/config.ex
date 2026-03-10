@@ -8,7 +8,7 @@ defmodule SymphonyElixir.Config do
 
   @default_active_states ["Todo", "In Progress"]
   @default_terminal_states ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
-  @default_linear_endpoint "https://api.linear.app/graphql"
+  @default_tracker_endpoint "https://api.linear.app/graphql"
   @default_prompt_template """
   You are working on a Linear issue.
 
@@ -50,7 +50,7 @@ defmodule SymphonyElixir.Config do
                                default: %{},
                                keys: [
                                  kind: [type: {:or, [:string, nil]}, default: nil],
-                                 endpoint: [type: :string, default: @default_linear_endpoint],
+                                 endpoint: [type: :string, default: @default_tracker_endpoint],
                                  api_key: [type: {:or, [:string, nil]}, default: nil],
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
@@ -183,39 +183,39 @@ defmodule SymphonyElixir.Config do
     get_in(validated_workflow_options(), [:tracker, :kind])
   end
 
-  @spec linear_endpoint() :: String.t()
-  def linear_endpoint do
+  @spec tracker_endpoint() :: String.t()
+  def tracker_endpoint do
     get_in(validated_workflow_options(), [:tracker, :endpoint])
   end
 
-  @spec linear_api_token() :: String.t() | nil
-  def linear_api_token do
+  @spec tracker_api_token() :: String.t() | nil
+  def tracker_api_token do
     validated_workflow_options()
     |> get_in([:tracker, :api_key])
     |> resolve_env_value(System.get_env("LINEAR_API_KEY"))
     |> normalize_secret_value()
   end
 
-  @spec linear_project_slug() :: String.t() | nil
-  def linear_project_slug do
+  @spec tracker_project_slug() :: String.t() | nil
+  def tracker_project_slug do
     get_in(validated_workflow_options(), [:tracker, :project_slug])
   end
 
-  @spec linear_assignee() :: String.t() | nil
-  def linear_assignee do
+  @spec tracker_assignee() :: String.t() | nil
+  def tracker_assignee do
     validated_workflow_options()
     |> get_in([:tracker, :assignee])
     |> resolve_env_value(System.get_env("LINEAR_ASSIGNEE"))
     |> normalize_secret_value()
   end
 
-  @spec linear_active_states() :: [String.t()]
-  def linear_active_states do
+  @spec tracker_active_states() :: [String.t()]
+  def tracker_active_states do
     get_in(validated_workflow_options(), [:tracker, :active_states])
   end
 
-  @spec linear_terminal_states() :: [String.t()]
-  def linear_terminal_states do
+  @spec tracker_terminal_states() :: [String.t()]
+  def tracker_terminal_states do
     get_in(validated_workflow_options(), [:tracker, :terminal_states])
   end
 
@@ -365,8 +365,8 @@ defmodule SymphonyElixir.Config do
   def validate! do
     with {:ok, _workflow} <- current_workflow(),
          :ok <- require_tracker_kind(),
-         :ok <- require_linear_token(),
-         :ok <- require_linear_project(),
+         :ok <- require_tracker_token(),
+         :ok <- require_tracker_project(),
          :ok <- require_valid_codex_runtime_settings() do
       require_codex_command()
     end
@@ -391,17 +391,22 @@ defmodule SymphonyElixir.Config do
       "linear" -> :ok
       "memory" -> :ok
       nil -> {:error, :missing_tracker_kind}
-      other -> {:error, {:unsupported_tracker_kind, other}}
-    end
-  end
-
-  defp require_linear_token do
-    case tracker_kind() do
-      "linear" ->
-        if is_binary(linear_api_token()) do
+      other ->
+        module = Module.concat([other])
+        if Code.ensure_loaded?(module) do
           :ok
         else
-          {:error, :missing_linear_api_token}
+          {:error, {:unsupported_tracker_kind, other}}
+        end
+    end
+  end
+  defp require_tracker_token do
+    case tracker_kind() do
+      "linear" ->
+        if is_binary(tracker_api_token()) do
+          :ok
+        else
+          {:error, :missing_tracker_api_token}
         end
 
       _ ->
@@ -409,13 +414,13 @@ defmodule SymphonyElixir.Config do
     end
   end
 
-  defp require_linear_project do
+  defp require_tracker_project do
     case tracker_kind() do
       "linear" ->
-        if is_binary(linear_project_slug()) do
+        if is_binary(tracker_project_slug()) do
           :ok
         else
-          {:error, :missing_linear_project_slug}
+          {:error, :missing_tracker_project_slug}
         end
 
       _ ->
@@ -781,12 +786,14 @@ defmodule SymphonyElixir.Config do
   end
 
   defp normalize_tracker_kind(kind) when is_binary(kind) do
-    kind
-    |> String.trim()
-    |> String.downcase()
-    |> case do
+    case String.trim(kind) do
       "" -> nil
-      normalized -> normalized
+      trimmed ->
+        case String.downcase(trimmed) do
+          "linear" -> "linear"
+          "memory" -> "memory"
+          _ -> trimmed
+        end
     end
   end
 
