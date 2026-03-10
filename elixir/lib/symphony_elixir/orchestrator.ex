@@ -441,15 +441,55 @@ defmodule SymphonyElixir.Orchestrator do
     active_states = active_state_set()
     terminal_states = terminal_state_set()
 
-    issues
-    |> sort_issues_for_dispatch()
-    |> Enum.reduce(state, fn issue, state_acc ->
-      if should_dispatch_issue?(issue, state_acc, active_states, terminal_states) do
-        dispatch_issue(state_acc, issue)
-      else
-        state_acc
-      end
-    end)
+    {candidates, _final_state} =
+      issues
+      |> sort_issues_for_dispatch()
+      |> Enum.reduce({[], state}, fn issue, {candidates, state_acc} ->
+        if should_dispatch_issue?(issue, state_acc, active_states, terminal_states) do
+          temp_running = Map.put(state_acc.running, issue.id, %{issue: issue})
+          temp_state = %{state_acc | running: temp_running, claimed: MapSet.put(state_acc.claimed, issue.id)}
+          {[issue | candidates], temp_state}
+        else
+          {candidates, state_acc}
+        end
+      end)
+
+    candidates = Enum.reverse(candidates)
+
+    if candidates != [] do
+      batch_dispatch_issues(candidates, state, terminal_states)
+    else
+      state
+    end
+  end
+
+  defp batch_dispatch_issues(candidates, %State{} = state, terminal_states) do
+    candidate_ids = Enum.map(candidates, & &1.id)
+
+    case Tracker.fetch_issue_states_by_ids(candidate_ids) do
+      {:ok, refreshed_issues} ->
+        refreshed_issues_map = Map.new(refreshed_issues, &{&1.id, &1})
+
+        Enum.reduce(candidates, state, fn issue, state_acc ->
+          case Map.fetch(refreshed_issues_map, issue.id) do
+            {:ok, %Issue{} = refreshed_issue} ->
+              if retry_candidate_issue?(refreshed_issue, terminal_states) do
+                do_dispatch_issue(state_acc, refreshed_issue, nil)
+              else
+                Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+                state_acc
+              end
+
+            :error ->
+              Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
+              state_acc
+          end
+        end)
+
+      {:error, reason} ->
+        Logger.warning("Skipping batch dispatch; issue refresh failed: #{inspect(reason)}")
+        state
+    end
   end
 
   defp sort_issues_for_dispatch(issues) when is_list(issues) do
@@ -577,7 +617,7 @@ defmodule SymphonyElixir.Orchestrator do
     |> MapSet.new()
   end
 
-  defp dispatch_issue(%State{} = state, issue, attempt \\ nil) do
+  defp dispatch_issue(%State{} = state, issue, attempt) do
     case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
       {:ok, %Issue{} = refreshed_issue} ->
         do_dispatch_issue(state, refreshed_issue, attempt)
