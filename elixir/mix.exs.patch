@@ -1,0 +1,11 @@
+--- elixir/mix.exs
++++ elixir/mix.exs
+@@ -53,6 +53,7 @@
+       {:solid, "~> 1.2"},
+       {:nimble_options, "~> 1.1"},
+       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+-      {:dialyxir, "~> 1.4", only: [:dev], runtime: false}
++      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
++      {:benchee, "~> 1.3", only: :test}
+     ]
+   end

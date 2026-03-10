@@ -1,0 +1,13 @@
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -249,8 +249,8 @@
+           GenServer.reply(from, :ok)
+
+           reconcile_running_issue_states(
+             issues,
+             state,
+-            active_state_set(),
+-            terminal_state_set()
++            state.active_states,
++            state.terminal_states
+           )
