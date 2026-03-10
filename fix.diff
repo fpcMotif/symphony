@@ -1,0 +1,12 @@
+--- elixir/lib/symphony_elixir/status_dashboard.ex
++++ elixir/lib/symphony_elixir/status_dashboard.ex
+@@ -328,7 +328,9 @@
+   end
+
+-  defp format_snapshot_content({:ok, snapshot}, tps, terminal_columns_override \\ nil) do
++  defp format_snapshot_content(snapshot_data, tps, terminal_columns_override \\ nil)
++
++  defp format_snapshot_content({:ok, snapshot}, tps, terminal_columns_override) do
+     running_event_width = running_event_width(terminal_columns_override)
+
+     [
