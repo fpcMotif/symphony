@@ -324,6 +324,7 @@ Top-level keys:
 - `hooks`
 - `agent`
 - `codex`
+- `observability`
 
 Unknown keys should be ignored for forward compatibility.
 
@@ -442,6 +443,19 @@ fields locally if they want stricter startup checks.
 - `stall_timeout_ms` (integer)
   - Default: `300000` (5 minutes)
   - If `<= 0`, stall detection is disabled.
+
+#### 5.3.7 `observability` (object)
+
+Fields:
+
+- `enabled` (boolean)
+  - Default: `true`
+  - Controls whether operator-visible observability surfaces (e.g., status dashboards, progress indicators) should be enabled.
+- `refresh_ms` (integer)
+  - Default: `1000`
+- `render_interval_ms` (integer)
+  - Default: `16`
+
 
 ### 5.4 Prompt Template Contract
 
@@ -2096,8 +2110,6 @@ Use the same validation profiles as Section 17:
 - Optional `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth.
 - TODO: Persist retry queue and session metadata across process restarts.
-- TODO: Make observability settings configurable in workflow front matter without prescribing UI
-  implementation details.
 - TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
   of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.
