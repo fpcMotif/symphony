@@ -41,4 +41,36 @@ defmodule SymphonyElixir.HttpServerTest do
     assert {:ok, _} = HttpServer.start_link(port: 0, host: "localhost")
     GenServer.stop(Endpoint)
   end
+
+  test "bound_port/0 returns nil when endpoint is not started" do
+    assert HttpServer.bound_port() == nil
+  end
+
+  test "start_link/1 with port: 0 and IPv6 tuple host" do
+    assert {:ok, _} = HttpServer.start_link(port: 0, host: {0, 0, 0, 0, 0, 0, 0, 1})
+    port = HttpServer.bound_port()
+    assert is_integer(port) and port > 0
+    GenServer.stop(Endpoint)
+  end
+
+  test "start_link/1 ignores negative port" do
+    assert HttpServer.start_link(port: -1) == :ignore
+  end
+
+  test "start_link/1 ignores string port" do
+    assert HttpServer.start_link(port: "8080") == :ignore
+  end
+
+  test "start_link/1 accepts snapshot_timeout_ms option" do
+    assert {:ok, _} = HttpServer.start_link(port: 0, snapshot_timeout_ms: 5_000)
+    GenServer.stop(Endpoint)
+  end
+
+  test "child_spec/1 uses correct module for start" do
+    spec = HttpServer.child_spec([])
+    assert spec.id == HttpServer
+    {mod, fun, _args} = spec.start
+    assert mod == HttpServer
+    assert fun == :start_link
+  end
 end

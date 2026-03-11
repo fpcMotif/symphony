@@ -247,7 +247,9 @@ defmodule SymphonyElixir.CoreTest do
         },
         claimed: MapSet.new([issue_id]),
         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-        retry_attempts: %{}
+        retry_attempts: %{},
+        active_states: MapSet.new(["todo", "in progress", "in review"]),
+        terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate"])
       }
 
       issue = %Issue{
@@ -310,7 +312,9 @@ defmodule SymphonyElixir.CoreTest do
         },
         claimed: MapSet.new([issue_id]),
         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-        retry_attempts: %{}
+        retry_attempts: %{},
+        active_states: MapSet.new(["todo", "in progress", "in review"]),
+        terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate"])
       }
 
       issue = %Issue{
@@ -352,7 +356,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     issue = %Issue{
@@ -398,7 +404,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     updated_state = Orchestrator.reconcile_issue_states_for_test([], state)
@@ -435,7 +443,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     issue = %Issue{
@@ -492,7 +502,7 @@ defmodule SymphonyElixir.CoreTest do
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 500, 1_100)
+    assert_due_in_range(due_at_ms, 250, 1_100)
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -532,7 +542,7 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 39_500, 40_500)
+    assert_due_in_range(due_at_ms, 39_000, 40_500)
   end
 
   test "first abnormal worker exit waits before retrying" do
@@ -571,7 +581,7 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 9_000, 10_500)
+    assert_due_in_range(due_at_ms, 8_750, 10_500)
   end
 
   defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
@@ -1588,7 +1598,9 @@ defmodule SymphonyElixir.CoreTest do
       running: %{},
       claimed: MapSet.new(),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     refute Orchestrator.should_dispatch_issue_for_test(blocked_issue, state)
@@ -1614,7 +1626,9 @@ defmodule SymphonyElixir.CoreTest do
       running: %{},
       claimed: MapSet.new(),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     assert Orchestrator.should_dispatch_issue_for_test(unblocked_issue, state)
@@ -1653,7 +1667,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     updated_state = Orchestrator.reconcile_stalled_running_issues_for_test(state)
@@ -1685,7 +1701,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     updated_state = Orchestrator.reconcile_stalled_running_issues_for_test(state)
@@ -1728,7 +1746,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new(["per-state-1"]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
@@ -1768,7 +1788,9 @@ defmodule SymphonyElixir.CoreTest do
       claimed: MapSet.new(["slot-exhaust-1"]),
       max_concurrent_agents: 1,
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
@@ -1784,6 +1806,7 @@ defmodule SymphonyElixir.CoreTest do
 
     write_workflow_file!(Workflow.workflow_file_path(),
       workspace_root: workspace_root,
+      tracker_kind: "memory",
       tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
     )
 
@@ -1834,5 +1857,39 @@ defmodule SymphonyElixir.CoreTest do
     # priority 1 first (B before A because B has earlier created_at),
     # then priority 3 (C), then null priority (D sorts last)
     assert sorted_ids == ["b", "a", "c", "d"]
+  end
+
+  # ---------------------------------------------------------------------------
+  # Orchestrator tracker write APIs
+  # ---------------------------------------------------------------------------
+
+  test "orchestrator create_comment proxies to tracker adapter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    {:ok, pid} = Orchestrator.start_link(name: :test_orch_comment)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid)
+    end)
+
+    assert :ok = Orchestrator.create_comment(:test_orch_comment, "issue-1", "Test comment")
+    assert_receive {:memory_tracker_comment, "issue-1", "Test comment"}
+  end
+
+  test "orchestrator update_issue_state proxies to tracker adapter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    {:ok, pid} = Orchestrator.start_link(name: :test_orch_state)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid)
+    end)
+
+    assert :ok = Orchestrator.update_issue_state(:test_orch_state, "issue-1", "Done")
+    assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
   end
 end

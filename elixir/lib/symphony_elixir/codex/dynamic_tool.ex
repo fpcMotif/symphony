@@ -134,9 +134,9 @@ defmodule SymphonyElixir.Codex.DynamicTool do
 
   defp sanitize_graphql_document(query) when is_binary(query) do
     query
-    |> Regex.replace(~r/""".*?"""/s, "")
-    |> Regex.replace(~r/"(?:\\.|[^"\\])*"/s, "")
-    |> Regex.replace(~r/#.*$/m, "")
+    |> then(&Regex.replace(~r/""".*?"""/s, &1, ""))
+    |> then(&Regex.replace(~r/"(?:\\.|[^"\\])*"/s, &1, ""))
+    |> then(&Regex.replace(~r/#.*$/m, &1, ""))
   end
 
   defp count_graphql_operations(query) when is_binary(query) do
