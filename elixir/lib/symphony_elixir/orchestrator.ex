@@ -470,25 +470,27 @@ defmodule SymphonyElixir.Orchestrator do
       {:ok, refreshed_issues} ->
         refreshed_issues_map = Map.new(refreshed_issues, &{&1.id, &1})
 
-        Enum.reduce(candidates, state, fn issue, state_acc ->
-          case Map.fetch(refreshed_issues_map, issue.id) do
-            {:ok, %Issue{} = refreshed_issue} ->
-              if retry_candidate_issue?(refreshed_issue, terminal_states) do
-                do_dispatch_issue(state_acc, refreshed_issue, nil)
-              else
-                Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
-                state_acc
-              end
-
-            :error ->
-              Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
-              state_acc
-          end
-        end)
+        Enum.reduce(candidates, state, &dispatch_refreshed_issue(&1, &2, refreshed_issues_map, terminal_states))
 
       {:error, reason} ->
         Logger.warning("Skipping batch dispatch; issue refresh failed: #{inspect(reason)}")
         state
+    end
+  end
+
+  defp dispatch_refreshed_issue(issue, state_acc, refreshed_issues_map, terminal_states) do
+    case Map.fetch(refreshed_issues_map, issue.id) do
+      {:ok, %Issue{} = refreshed_issue} ->
+        if retry_candidate_issue?(refreshed_issue, terminal_states) do
+          do_dispatch_issue(state_acc, refreshed_issue, nil)
+        else
+          Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+          state_acc
+        end
+
+      :error ->
+        Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
+        state_acc
     end
   end
 
@@ -615,26 +617,6 @@ defmodule SymphonyElixir.Orchestrator do
     |> Enum.map(&normalize_issue_state/1)
     |> Enum.filter(&(&1 != ""))
     |> MapSet.new()
-  end
-
-  defp dispatch_issue(%State{} = state, issue, attempt) do
-    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
-      {:ok, %Issue{} = refreshed_issue} ->
-        do_dispatch_issue(state, refreshed_issue, attempt)
-
-      {:skip, :missing} ->
-        Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
-        state
-
-      {:skip, %Issue{} = refreshed_issue} ->
-        Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
-
-        state
-
-      {:error, reason} ->
-        Logger.warning("Skipping dispatch; issue refresh failed for #{issue_context(issue)}: #{inspect(reason)}")
-        state
-    end
   end
 
   defp do_dispatch_issue(%State{} = state, issue, attempt) do
@@ -839,7 +821,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp handle_active_retry(state, issue, attempt, metadata) do
     if retry_candidate_issue?(issue, terminal_state_set()) and
          dispatch_slots_available?(issue, state) do
-      {:noreply, dispatch_issue(state, issue, attempt)}
+      {:noreply, do_dispatch_issue(state, issue, attempt)}
     else
       Logger.debug("No available slots for retrying #{issue_context(issue)}; retrying again")
 
