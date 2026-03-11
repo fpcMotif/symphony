@@ -38,9 +38,13 @@ defmodule SymphonyElixir.Tracker do
 
   @spec adapter() :: module()
   def adapter do
-    case Config.tracker_kind() do
-      "memory" -> SymphonyElixir.Tracker.Memory
-      _ -> SymphonyElixir.Linear.Adapter
+    kind = Config.tracker_kind()
+
+    cond do
+      is_nil(kind) -> SymphonyElixir.Linear.Adapter
+      String.downcase(kind) == "memory" -> SymphonyElixir.Tracker.Memory
+      String.downcase(kind) == "linear" -> SymphonyElixir.Linear.Adapter
+      true -> String.to_existing_atom("Elixir." <> kind)
     end
   end
 end

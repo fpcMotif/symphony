@@ -388,38 +388,62 @@ defmodule SymphonyElixir.Config do
 
   defp require_tracker_kind do
     case tracker_kind() do
-      "linear" -> :ok
-      "memory" -> :ok
-      nil -> {:error, :missing_tracker_kind}
-      other -> {:error, {:unsupported_tracker_kind, other}}
+      nil ->
+        {:error, :missing_tracker_kind}
+
+      kind when is_binary(kind) ->
+        case String.downcase(kind) do
+          "linear" ->
+            :ok
+
+          "memory" ->
+            :ok
+
+          _ ->
+            try do
+              module = String.to_existing_atom("Elixir." <> kind)
+
+              if Code.ensure_loaded?(module) do
+                :ok
+              else
+                {:error, {:unsupported_tracker_kind, kind}}
+              end
+            rescue
+              ArgumentError ->
+                {:error, {:unsupported_tracker_kind, kind}}
+            end
+        end
+
+      other ->
+        {:error, {:unsupported_tracker_kind, other}}
     end
   end
 
   defp require_linear_token do
-    case tracker_kind() do
-      "linear" ->
-        if is_binary(linear_api_token()) do
-          :ok
-        else
-          {:error, :missing_linear_api_token}
-        end
+    kind = tracker_kind()
 
-      _ ->
+    if is_binary(kind) and String.downcase(kind) == "linear" do
+      if is_binary(linear_api_token()) do
         :ok
+      else
+        {:error, :missing_linear_api_token}
+      end
+    else
+      :ok
     end
   end
 
   defp require_linear_project do
-    case tracker_kind() do
-      "linear" ->
-        if is_binary(linear_project_slug()) do
-          :ok
-        else
-          {:error, :missing_linear_project_slug}
-        end
+    kind = tracker_kind()
 
-      _ ->
+    if is_binary(kind) and String.downcase(kind) == "linear" do
+      if is_binary(linear_project_slug()) do
         :ok
+      else
+        {:error, :missing_linear_project_slug}
+      end
+    else
+      :ok
     end
   end
 
@@ -783,7 +807,6 @@ defmodule SymphonyElixir.Config do
   defp normalize_tracker_kind(kind) when is_binary(kind) do
     kind
     |> String.trim()
-    |> String.downcase()
     |> case do
       "" -> nil
       normalized -> normalized

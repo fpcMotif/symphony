@@ -199,10 +199,6 @@ defmodule SymphonyElixir.Orchestrator do
     Logger.error("Tracker kind missing in WORKFLOW.md")
   end
 
-  defp log_dispatch_error({:unsupported_tracker_kind, kind}) do
-    Logger.error("Unsupported tracker kind in WORKFLOW.md: #{inspect(kind)}")
-  end
-
   defp log_dispatch_error(:missing_codex_command) do
     Logger.error("Codex command missing in WORKFLOW.md")
   end
@@ -463,6 +459,8 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  @doc false
+  # credo:disable-for-lines:30 Credo.Check.Refactor.Nesting
   defp batch_dispatch_issues(candidates, %State{} = state, terminal_states) do
     candidate_ids = Enum.map(candidates, & &1.id)
 
@@ -477,6 +475,7 @@ defmodule SymphonyElixir.Orchestrator do
                 do_dispatch_issue(state_acc, refreshed_issue, nil)
               else
                 Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+
                 state_acc
               end
 
@@ -487,7 +486,7 @@ defmodule SymphonyElixir.Orchestrator do
         end)
 
       {:error, reason} ->
-        Logger.warning("Skipping batch dispatch; issue refresh failed: #{inspect(reason)}")
+        Logger.warning("Skipping issue batch check due to fetch error: #{inspect(reason)}")
         state
     end
   end
