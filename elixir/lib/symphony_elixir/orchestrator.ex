@@ -173,14 +173,18 @@ defmodule SymphonyElixir.Orchestrator do
   defp maybe_dispatch(%State{} = state) do
     state = reconcile_running_issues(state)
 
+    if available_slots(state) > 0 do
+      dispatch_candidate_issues(state)
+    else
+      state
+    end
+  end
+
+  defp dispatch_candidate_issues(%State{} = state) do
     with :ok <- Config.validate!(),
-         {:ok, issues} <- Tracker.fetch_candidate_issues(),
-         true <- available_slots(state) > 0 do
+         {:ok, issues} <- Tracker.fetch_candidate_issues() do
       choose_issues(issues, state)
     else
-      false ->
-        state
-
       {:error, error} ->
         log_dispatch_error(error)
         state
@@ -471,23 +475,28 @@ defmodule SymphonyElixir.Orchestrator do
         refreshed_issues_map = Map.new(refreshed_issues, &{&1.id, &1})
 
         Enum.reduce(candidates, state, fn issue, state_acc ->
-          case Map.fetch(refreshed_issues_map, issue.id) do
-            {:ok, %Issue{} = refreshed_issue} ->
-              if retry_candidate_issue?(refreshed_issue, terminal_states) do
-                do_dispatch_issue(state_acc, refreshed_issue, nil)
-              else
-                Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
-                state_acc
-              end
-
-            :error ->
-              Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
-              state_acc
-          end
+          batch_dispatch_single_issue(issue, state_acc, refreshed_issues_map, terminal_states)
         end)
 
       {:error, reason} ->
         Logger.warning("Skipping batch dispatch; issue refresh failed: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp batch_dispatch_single_issue(issue, state, refreshed_issues_map, terminal_states) do
+    case Map.fetch(refreshed_issues_map, issue.id) do
+      {:ok, %Issue{} = refreshed_issue} ->
+        if retry_candidate_issue?(refreshed_issue, terminal_states) do
+          do_dispatch_issue(state, refreshed_issue, nil)
+        else
+          Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+
+          state
+        end
+
+      :error ->
+        Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
         state
     end
   end
