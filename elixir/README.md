@@ -170,6 +170,15 @@ The observability UI now runs on a minimal Phoenix stack:
 make all
 ```
 
+Run the dashboard browser e2e suite (starts a deterministic fixture endpoint and validates LiveView/API behavior):
+
+```bash
+cd e2e
+npm install
+npx playwright install chromium
+npm test
+```
+
 ## FAQ
 
 ### Why Elixir?
