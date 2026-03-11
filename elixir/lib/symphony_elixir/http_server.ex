@@ -82,7 +82,7 @@ defmodule SymphonyElixir.HttpServer do
   defp normalize_host(host) when is_binary(host), do: host
   defp normalize_host({_, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
   defp normalize_host({_, _, _, _, _, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
-  defp normalize_host(host), do: to_string(host)
+
 
   defp secret_key_base do
     Base.encode64(:crypto.strong_rand_bytes(@secret_key_bytes), padding: false)

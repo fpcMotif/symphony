@@ -1,0 +1,14 @@
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -1142,6 +1142,8 @@
+   defp refresh_runtime_config(%State{} = state) do
+     %{
+       state
+-      | poll_interval_ms: Config.poll_interval_ms(),
+-        max_concurrent_agents: Config.max_concurrent_agents()
++      | poll_interval_ms: Config.poll_interval_ms(),
++        max_concurrent_agents: Config.max_concurrent_agents(),
++        active_state_set: active_state_set(),
++        terminal_state_set: terminal_state_set()
+     }
+   end

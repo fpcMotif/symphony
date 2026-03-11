@@ -1,0 +1,38 @@
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -37,7 +37,9 @@
+       claimed: MapSet.new(),
+       retry_attempts: %{},
+       codex_totals: nil,
+-      codex_rate_limits: nil
++      codex_rate_limits: nil,
++      active_state_set: MapSet.new(),
++      terminal_state_set: MapSet.new()
+     ]
+   end
+
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -58,7 +58,9 @@
+       poll_check_in_progress: false,
+       codex_totals: @empty_codex_totals,
+-      codex_rate_limits: nil
++      codex_rate_limits: nil,
++      active_state_set: active_state_set(),
++      terminal_state_set: terminal_state_set()
+     }
+
+     run_terminal_workspace_cleanup()
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -1142,6 +1142,8 @@
+   defp refresh_runtime_config(%State{} = state) do
+     %{
+       state
+-      | poll_interval_ms: Config.poll_interval_ms(),
+-        max_concurrent_agents: Config.max_concurrent_agents()
++      | poll_interval_ms: Config.poll_interval_ms(),
++        max_concurrent_agents: Config.max_concurrent_agents(),
++        active_state_set: active_state_set(),
++        terminal_state_set: terminal_state_set()
+     }

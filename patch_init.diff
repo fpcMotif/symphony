@@ -1,0 +1,12 @@
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -58,7 +58,9 @@
+       poll_check_in_progress: false,
+       codex_totals: @empty_codex_totals,
+-      codex_rate_limits: nil
++      codex_rate_limits: nil,
++      active_state_set: active_state_set(),
++      terminal_state_set: terminal_state_set()
+     }
+
+     run_terminal_workspace_cleanup()

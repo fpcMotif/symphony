@@ -1,0 +1,12 @@
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -37,7 +37,9 @@
+       claimed: MapSet.new(),
+       retry_attempts: %{},
+       codex_totals: nil,
+-      codex_rate_limits: nil
++      codex_rate_limits: nil,
++      active_state_set: MapSet.new(),
++      terminal_state_set: MapSet.new()
+     ]
+   end

@@ -1,0 +1,91 @@
+--- elixir/lib/symphony_elixir/orchestrator.ex
++++ elixir/lib/symphony_elixir/orchestrator.ex
+@@ -251,8 +251,8 @@
+         case Map.get(state, :poll_check_in_progress) do
+           false ->
+             Tracker.fetch_issues(
+-              active_state_set(),
+-              terminal_state_set()
++              state.active_state_set,
++              state.terminal_state_set
+             )
+
+           true ->
+@@ -266,17 +266,17 @@
+         state = %{state | poll_check_in_progress: false}
+         handle_issue_fetch_results(issues, failures, state)
+
+-      reconcile_running_issue_states(issues, state, active_state_set(), terminal_state_set())
++      reconcile_running_issue_states(issues, state, state.active_state_set, state.terminal_state_set)
+     else
+       _ ->
+-        reconcile_running_issue_states(issues, state, active_state_set(), terminal_state_set())
++        reconcile_running_issue_states(issues, state, state.active_state_set, state.terminal_state_set)
+     end
+   end
+
+   def handle_info({:poll_retry, %Issue{} = issue, attempt}, %State{} = state) do
+     Logger.info("Retrying issue #{issue.identifier} (attempt #{attempt})")
+
+-    if should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set()) do
++    if should_dispatch_issue?(issue, state, state.active_state_set, state.terminal_state_set) do
+       dispatch_issue(state, issue, attempt)
+     else
+       {:noreply, state}
+@@ -284,7 +284,7 @@
+   end
+
+   def handle_info({:poll_retry_continue, %Issue{} = issue, attempt, issue_fetcher}, %State{} = state) do
+-    case revalidate_issue_for_dispatch(issue, issue_fetcher, terminal_state_set()) do
++    case revalidate_issue_for_dispatch(issue, issue_fetcher, state.terminal_state_set) do
+       {:ok, %Issue{} = refreshed_issue} ->
+         if dispatch_slots_available?(refreshed_issue, state) do
+           do_dispatch_issue(state, refreshed_issue, attempt)
+@@ -442,8 +442,8 @@
+   def handle_cast({:dispatch_continuation, issue_id}, %State{} = state) do
+     with %Issue{} = issue <- state.running[issue_id],
+          true <- state_slots_available?(issue, state.running) do
+-      active_states = active_state_set()
+-      terminal_states = terminal_state_set()
++      active_states = state.active_state_set
++      terminal_states = state.terminal_state_set
+
+       issue_fetcher =
+         fn -> Tracker.fetch_issue_states_by_ids([issue_id]) end
+@@ -622,7 +622,7 @@
+   end
+
+   defp dispatch_issue(%State{} = state, issue, attempt) do
+-    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
++    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, state.terminal_state_set) do
+       {:ok, %Issue{} = refreshed_issue} ->
+         do_dispatch_issue(state, refreshed_issue, attempt)
+
+@@ -789,7 +789,7 @@
+     else
+       failures ->
+         Logger.warning("Failed to refresh terminal running issues: #{inspect(failures)}")
+-        terminal_states = terminal_state_set()
++        terminal_states = state.terminal_state_set
+
+         {still_running, newly_terminated} =
+           state.running
+@@ -841,7 +841,7 @@
+   defp handle_issue_fetch_results(issues, [], state) do
+     Enum.reduce(issues, state, fn %Issue{} = issue, acc_state ->
+       attempt = Map.get(acc_state.retry_attempts, issue.id, 1)
+-      if retry_candidate_issue?(issue, terminal_state_set()) and
++      if retry_candidate_issue?(issue, acc_state.active_state_set, acc_state.terminal_state_set) and
+            dispatch_slots_available?(issue, acc_state) do
+         Logger.info("Enqueuing unblocked candidate issue #{issue.identifier}")
+         # Send message to self to start issue polling loop
+@@ -1153,8 +1153,8 @@
+     }
+   end
+
+-  defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
+-    candidate_issue?(issue, active_state_set(), terminal_states) and
++  defp retry_candidate_issue?(%Issue{} = issue, active_states, terminal_states) do
++    candidate_issue?(issue, active_states, terminal_states) and
+       !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
+   end
