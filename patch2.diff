@@ -1,0 +1,29 @@
+<<<<<<< SEARCH
+    assert handler_config.config.max_no_bytes == 1024
+    assert handler_config.config.max_no_files == 2
+  end
+end
+=======
+    assert handler_config.config.max_no_bytes == 1024
+    assert handler_config.config.max_no_files == 2
+  end
+
+  test "configure/0 handles :logger.add_handler error gracefully" do
+    # Save current config
+    orig_max_files = Application.get_env(:symphony_elixir, :log_file_max_files)
+
+    on_exit(fn ->
+      if orig_max_files, do: Application.put_env(:symphony_elixir, :log_file_max_files, orig_max_files), else: Application.delete_env(:symphony_elixir, :log_file_max_files)
+    end)
+
+    # Provide an invalid max_files to trigger a validation error in logger_disk_log_h
+    Application.put_env(:symphony_elixir, :log_file_max_files, -1)
+
+    log = capture_log(fn ->
+      assert :ok = LogFile.configure()
+    end)
+
+    assert log =~ "Failed to configure rotating log file handler:"
+  end
+end
+>>>>>>> REPLACE

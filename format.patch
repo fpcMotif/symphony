@@ -1,0 +1,40 @@
+<<<<<<< SEARCH
+    on_exit(fn ->
+      if orig_log_file, do: Application.put_env(:symphony_elixir, :log_file, orig_log_file), else: Application.delete_env(:symphony_elixir, :log_file)
+      if orig_max_bytes, do: Application.put_env(:symphony_elixir, :log_file_max_bytes, orig_max_bytes), else: Application.delete_env(:symphony_elixir, :log_file_max_bytes)
+      if orig_max_files, do: Application.put_env(:symphony_elixir, :log_file_max_files, orig_max_files), else: Application.delete_env(:symphony_elixir, :log_file_max_files)
+    end)
+=======
+    on_exit(fn ->
+      if orig_log_file do
+        Application.put_env(:symphony_elixir, :log_file, orig_log_file)
+      else
+        Application.delete_env(:symphony_elixir, :log_file)
+      end
+
+      if orig_max_bytes do
+        Application.put_env(:symphony_elixir, :log_file_max_bytes, orig_max_bytes)
+      else
+        Application.delete_env(:symphony_elixir, :log_file_max_bytes)
+      end
+
+      if orig_max_files do
+        Application.put_env(:symphony_elixir, :log_file_max_files, orig_max_files)
+      else
+        Application.delete_env(:symphony_elixir, :log_file_max_files)
+      end
+    end)
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+    on_exit(fn ->
+      if orig_max_files, do: Application.put_env(:symphony_elixir, :log_file_max_files, orig_max_files), else: Application.delete_env(:symphony_elixir, :log_file_max_files)
+    end)
+=======
+    on_exit(fn ->
+      if orig_max_files do
+        Application.put_env(:symphony_elixir, :log_file_max_files, orig_max_files)
+      else
+        Application.delete_env(:symphony_elixir, :log_file_max_files)
+      end
+    end)
+>>>>>>> REPLACE
