@@ -117,4 +117,33 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  test "delegates to Workflow.load/0 when GenServer is not running", %{workflow_file: workflow_file} do
+    # Stop the WorkflowStore process
+    if pid = Process.whereis(WorkflowStore) do
+      if Process.alive?(pid) do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      end
+      if Process.whereis(WorkflowStore) do
+        stop_supervised(WorkflowStore)
+      end
+    end
+
+    # Even without the GenServer, it should load the file directly
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+
+    # force_reload/0 should also just call load directly
+    File.write!(workflow_file, """
+    ---
+    tracker:
+      kind: "linear"
+    ---
+    Delegated Prompt
+    """)
+
+    assert :ok = WorkflowStore.force_reload()
+    {:ok, new_workflow} = WorkflowStore.current()
+    assert new_workflow.prompt == "Delegated Prompt"
+  end
 end
