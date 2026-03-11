@@ -13,29 +13,31 @@ defmodule SymphonyElixir.MixProject do
           threshold: 100
         ],
         ignore_modules: [
+          # Reads runtime environment and workflow front matter; exercised indirectly across many tests.
           SymphonyElixir.Config,
+          # External HTTP boundary wrapper; network paths are validated via adapters/fakes.
           SymphonyElixir.Linear.Client,
           SymphonyElixir.SpecsCheck,
+          # Stateful orchestrator startup/reconciliation behavior remains primarily covered via integration tests.
           SymphonyElixir.Orchestrator,
           SymphonyElixir.Orchestrator.State,
           SymphonyElixir.AgentRunner,
           SymphonyElixir.CLI,
           SymphonyElixir.Codex.AppServer,
           SymphonyElixir.Codex.DynamicTool,
+          # Startup-only supervision and endpoint boot wiring.
           SymphonyElixir.HttpServer,
           SymphonyElixir.StatusDashboard,
           SymphonyElixir.LogFile,
           SymphonyElixir.Workspace,
+          # LiveView process lifecycle is covered by e2e/live tests but still expensive to unit-isolate fully.
           SymphonyElixirWeb.DashboardLive,
+          # Phoenix endpoint startup wiring and adapter-specific behavior.
           SymphonyElixirWeb.Endpoint,
           SymphonyElixirWeb.ErrorHTML,
           SymphonyElixirWeb.ErrorJSON,
           SymphonyElixirWeb.Layouts,
-          SymphonyElixirWeb.ObservabilityApiController,
-          SymphonyElixirWeb.Presenter,
-          SymphonyElixirWeb.StaticAssetController,
-          SymphonyElixirWeb.StaticAssets,
-          SymphonyElixirWeb.Router,
+          # Generated helper module used by Phoenix path helper expansion.
           SymphonyElixirWeb.Router.Helpers
         ]
       ],
