@@ -462,14 +462,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         auto_approve_requests
       )
 
-    status =
-      if approval_status == :unhandled and needs_input?(method, payload) do
-        :input_required
-      else
-        approval_status
-      end
-
-    case status do
+    case resolve_status(approval_status, method, payload) do
       :input_required ->
         emit_message(
           on_message,
@@ -508,6 +501,12 @@ defmodule SymphonyElixir.Codex.AppServer do
         receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
     end
   end
+
+  defp resolve_status(:unhandled, method, payload) do
+    if needs_input?(method, payload), do: :input_required, else: :unhandled
+  end
+
+  defp resolve_status(status, _method, _payload), do: status
 
   defp maybe_handle_approval_request(
          port,
