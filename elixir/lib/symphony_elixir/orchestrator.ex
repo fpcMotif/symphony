@@ -36,7 +36,9 @@ defmodule SymphonyElixir.Orchestrator do
       claimed: MapSet.new(),
       retry_attempts: %{},
       codex_totals: nil,
-      codex_rate_limits: nil
+      codex_rate_limits: nil,
+      active_states: nil,
+      terminal_states: nil
     ]
   end
 
@@ -56,7 +58,9 @@ defmodule SymphonyElixir.Orchestrator do
       next_poll_due_at_ms: now_ms,
       poll_check_in_progress: false,
       codex_totals: @empty_codex_totals,
-      codex_rate_limits: nil
+      codex_rate_limits: nil,
+      active_states: active_state_set(),
+      terminal_states: terminal_state_set()
     }
 
     run_terminal_workspace_cleanup()
@@ -247,8 +251,8 @@ defmodule SymphonyElixir.Orchestrator do
           reconcile_running_issue_states(
             issues,
             state,
-            active_state_set(),
-            terminal_state_set()
+            state.active_states,
+            state.terminal_states
           )
 
         {:error, reason} ->
@@ -262,17 +266,17 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec reconcile_issue_states_for_test([Issue.t()], term()) :: term()
   def reconcile_issue_states_for_test(issues, %State{} = state) when is_list(issues) do
-    reconcile_running_issue_states(issues, state, active_state_set(), terminal_state_set())
+    reconcile_running_issue_states(issues, state, state.active_states, state.terminal_states)
   end
 
   def reconcile_issue_states_for_test(issues, state) when is_list(issues) do
-    reconcile_running_issue_states(issues, state, active_state_set(), terminal_state_set())
+    reconcile_running_issue_states(issues, state, state.active_states, state.terminal_states)
   end
 
   @doc false
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set())
+    should_dispatch_issue?(issue, state, state.active_states, state.terminal_states)
   end
 
   @doc false
@@ -438,8 +442,8 @@ defmodule SymphonyElixir.Orchestrator do
   defp terminate_task(_pid), do: :ok
 
   defp choose_issues(issues, state) do
-    active_states = active_state_set()
-    terminal_states = terminal_state_set()
+    active_states = state.active_states
+    terminal_states = state.terminal_states
 
     {candidates, _final_state} =
       issues
@@ -470,25 +474,31 @@ defmodule SymphonyElixir.Orchestrator do
       {:ok, refreshed_issues} ->
         refreshed_issues_map = Map.new(refreshed_issues, &{&1.id, &1})
 
-        Enum.reduce(candidates, state, fn issue, state_acc ->
-          case Map.fetch(refreshed_issues_map, issue.id) do
-            {:ok, %Issue{} = refreshed_issue} ->
-              if retry_candidate_issue?(refreshed_issue, terminal_states) do
-                do_dispatch_issue(state_acc, refreshed_issue, nil)
-              else
-                Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
-                state_acc
-              end
-
-            :error ->
-              Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
-              state_acc
-          end
-        end)
+        Enum.reduce(candidates, state, &process_batch_dispatch_candidate(&1, &2, refreshed_issues_map, terminal_states))
 
       {:error, reason} ->
         Logger.warning("Skipping batch dispatch; issue refresh failed: #{inspect(reason)}")
         state
+    end
+  end
+
+  defp process_batch_dispatch_candidate(issue, state_acc, refreshed_issues_map, terminal_states) do
+    case Map.fetch(refreshed_issues_map, issue.id) do
+      {:ok, %Issue{} = refreshed_issue} ->
+        dispatch_if_retry_candidate(state_acc, refreshed_issue, terminal_states)
+
+      :error ->
+        Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
+        state_acc
+    end
+  end
+
+  defp dispatch_if_retry_candidate(state_acc, refreshed_issue, terminal_states) do
+    if retry_candidate_issue?(refreshed_issue, state_acc.active_states, terminal_states) do
+      do_dispatch_issue(state_acc, refreshed_issue, nil)
+    else
+      Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+      state_acc
     end
   end
 
@@ -603,14 +613,18 @@ defmodule SymphonyElixir.Orchestrator do
     String.downcase(String.trim(state_name))
   end
 
-  defp terminal_state_set do
+  @doc false
+  @spec terminal_state_set() :: MapSet.t(String.t())
+  def terminal_state_set do
     Config.linear_terminal_states()
     |> Enum.map(&normalize_issue_state/1)
     |> Enum.filter(&(&1 != ""))
     |> MapSet.new()
   end
 
-  defp active_state_set do
+  @doc false
+  @spec active_state_set() :: MapSet.t(String.t())
+  def active_state_set do
     Config.linear_active_states()
     |> Enum.map(&normalize_issue_state/1)
     |> Enum.filter(&(&1 != ""))
@@ -618,7 +632,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp dispatch_issue(%State{} = state, issue, attempt) do
-    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, terminal_state_set()) do
+    case revalidate_issue_for_dispatch(issue, &Tracker.fetch_issue_states_by_ids/1, state.terminal_states) do
       {:ok, %Issue{} = refreshed_issue} ->
         do_dispatch_issue(state, refreshed_issue, attempt)
 
@@ -692,7 +706,7 @@ defmodule SymphonyElixir.Orchestrator do
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
     case issue_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
-        if retry_candidate_issue?(refreshed_issue, terminal_states) do
+        if retry_candidate_issue?(refreshed_issue, active_state_set(), terminal_states) do
           {:ok, refreshed_issue}
         else
           {:skip, refreshed_issue}
@@ -785,7 +799,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_retry_issue_lookup(%Issue{} = issue, state, issue_id, attempt, metadata) do
-    terminal_states = terminal_state_set()
+    terminal_states = state.terminal_states
 
     cond do
       terminal_issue_state?(issue.state, terminal_states) ->
@@ -794,7 +808,7 @@ defmodule SymphonyElixir.Orchestrator do
         cleanup_issue_workspace(issue.identifier)
         {:noreply, release_issue_claim(state, issue_id)}
 
-      retry_candidate_issue?(issue, terminal_states) ->
+      retry_candidate_issue?(issue, state.active_states, terminal_states) ->
         handle_active_retry(state, issue, attempt, metadata)
 
       true ->
@@ -837,7 +851,7 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_active_retry(state, issue, attempt, metadata) do
-    if retry_candidate_issue?(issue, terminal_state_set()) and
+    if retry_candidate_issue?(issue, state.active_states, state.terminal_states) and
          dispatch_slots_available?(issue, state) do
       {:noreply, dispatch_issue(state, issue, attempt)}
     else
@@ -1143,12 +1157,14 @@ defmodule SymphonyElixir.Orchestrator do
     %{
       state
       | poll_interval_ms: Config.poll_interval_ms(),
-        max_concurrent_agents: Config.max_concurrent_agents()
+        max_concurrent_agents: Config.max_concurrent_agents(),
+        active_states: active_state_set(),
+        terminal_states: terminal_state_set()
     }
   end
 
-  defp retry_candidate_issue?(%Issue{} = issue, terminal_states) do
-    candidate_issue?(issue, active_state_set(), terminal_states) and
+  defp retry_candidate_issue?(%Issue{} = issue, active_states, terminal_states) do
+    candidate_issue?(issue, active_states, terminal_states) and
       !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
   end
 

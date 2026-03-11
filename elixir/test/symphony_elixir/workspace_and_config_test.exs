@@ -421,7 +421,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       running: %{},
       claimed: MapSet.new(),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: Orchestrator.active_state_set(),
+      terminal_states: Orchestrator.terminal_state_set()
     }
 
     issue = %Issue{
@@ -443,7 +445,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       running: %{},
       claimed: MapSet.new(),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: Orchestrator.active_state_set(),
+      terminal_states: Orchestrator.terminal_state_set()
     }
 
     issue = %Issue{
@@ -463,7 +467,9 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       running: %{},
       claimed: MapSet.new(),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: Orchestrator.active_state_set(),
+      terminal_states: Orchestrator.terminal_state_set()
     }
 
     issue = %Issue{
