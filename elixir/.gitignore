@@ -51,3 +51,8 @@ status.txt
 
 # Ignore package tarball (built via "mix hex.build").
 symphony_elixir-*.tar
+
+# e2e Node/Playwright artifacts.
+/e2e/node_modules/
+/e2e/test-results/
+/e2e/playwright-report/
