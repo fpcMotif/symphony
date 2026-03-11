@@ -117,4 +117,146 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  describe "when GenServer is not running" do
+    setup do
+      # Stop the GenServer started in the main setup
+      if pid = Process.whereis(WorkflowStore) do
+        # GenServer might not be under a standard supervisor in tests if it was started manually
+        try do
+          GenServer.stop(WorkflowStore)
+        catch
+          :exit, _ -> Process.exit(pid, :kill)
+        end
+
+        # Ensure it's not registered
+        if Process.whereis(WorkflowStore) do
+          try do
+            Process.unregister(WorkflowStore)
+          catch
+            _, _ -> :ok
+          end
+        end
+      end
+
+      :ok
+    end
+
+    test "current/0 loads from file directly", %{workflow_file: _workflow_file} do
+      assert nil == Process.whereis(WorkflowStore)
+
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+    end
+
+    test "force_reload/0 loads from file directly and returns :ok", %{workflow_file: _workflow_file} do
+      assert nil == Process.whereis(WorkflowStore)
+
+      assert :ok = WorkflowStore.force_reload()
+
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+    end
+
+    test "force_reload/0 returns error if file is missing" do
+      assert nil == Process.whereis(WorkflowStore)
+
+      # Change the workflow file path to a non-existent file
+      Workflow.set_workflow_file_path("/non/existent/path/WORKFLOW.md")
+
+      assert {:error, {:missing_workflow_file, "/non/existent/path/WORKFLOW.md", :enoent}} = WorkflowStore.force_reload()
+    end
+  end
+
+  describe "start_link/1 failures" do
+    setup do
+      # To test start_link/1 independently and cleanly, we should make sure the main test
+      # supervisor isn't getting in the way
+      # The main setup block calls `start_supervised!({WorkflowStore, []})` if it's not already running
+      # Since `async: false` is used, the tests run sequentially.
+      # Let's cleanly stop it using stop_supervised
+
+      try do
+        stop_supervised(WorkflowStore)
+      catch
+        _, _ -> :ok
+      end
+
+      # Also try stopping from the main application supervisor if it happens to be running there
+      try do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      catch
+        _, _ -> :ok
+      end
+
+      pid = Process.whereis(WorkflowStore)
+
+      if pid do
+        try do
+          Process.exit(pid, :kill)
+        catch
+          _, _ -> :ok
+        end
+
+        try do
+          Process.unregister(WorkflowStore)
+        catch
+          _, _ -> :ok
+        end
+      end
+
+      # Small sleep to ensure the KILL signal propagates
+      :timer.sleep(10)
+
+      # Make sure the supervisor doesn't bring it back immediately
+      assert nil == Process.whereis(WorkflowStore)
+
+      Process.flag(:trap_exit, true)
+
+      on_exit(fn ->
+        if Process.whereis(WorkflowStore) do
+          try do
+            Process.unregister(WorkflowStore)
+          catch
+            _, _ -> :ok
+          end
+        end
+      end)
+
+      :ok
+    end
+
+    test "fails to start if workflow file is missing" do
+      Workflow.set_workflow_file_path("/non/existent/path/WORKFLOW.md")
+
+      assert {:error, {:missing_workflow_file, "/non/existent/path/WORKFLOW.md", :enoent}} = WorkflowStore.start_link()
+    end
+
+    test "fails to start if workflow file is invalid", %{workflow_file: workflow_file} do
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+
+      assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.start_link()
+    end
+  end
+
+  describe "polling behavior" do
+    test "polls for changes automatically and handles invalid state", %{workflow_file: workflow_file} do
+      # Verify initial state
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+
+      # Modify the file to be invalid
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+
+      # Manually trigger the :poll message that the GenServer schedules for itself
+      send(Process.whereis(WorkflowStore), :poll)
+
+      # Wait a tiny bit for the message to be processed
+      :timer.sleep(10)
+
+      # Calling `current/0` should still return the old state
+      {:ok, workflow_after_error} = WorkflowStore.current()
+      assert workflow_after_error.prompt == "Initial Prompt"
+    end
+  end
 end
