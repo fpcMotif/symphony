@@ -117,4 +117,81 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  describe "initialization errors" do
+    test "init/1 stops if workflow file is not found" do
+      # Make sure the application's WorkflowStore is stopped cleanly
+      if _pid = Process.whereis(SymphonyElixir.WorkflowStore) do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+      end
+
+      original_path = Workflow.workflow_file_path()
+
+      # Attempt to start it pointing to a non-existent file
+      Workflow.set_workflow_file_path("/path/to/nowhere/WORKFLOW.md")
+
+      Process.flag(:trap_exit, true)
+
+      assert {:error, {:missing_workflow_file, "/path/to/nowhere/WORKFLOW.md", :enoent}} =
+               WorkflowStore.start_link()
+
+      # Restore for other tests
+      Workflow.set_workflow_file_path(original_path)
+      Supervisor.restart_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+    end
+  end
+
+  describe "fallback when unstarted" do
+    setup do
+      original_path = Workflow.workflow_file_path()
+
+      if _pid = Process.whereis(SymphonyElixir.WorkflowStore) do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+      end
+
+      on_exit(fn ->
+        Workflow.set_workflow_file_path(original_path)
+        Supervisor.restart_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+      end)
+
+      :ok
+    end
+
+    test "current/0 loads workflow directly" do
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+    end
+
+    test "force_reload/0 returns :ok if file is valid" do
+      assert :ok = WorkflowStore.force_reload()
+    end
+
+    test "force_reload/0 returns error if file is invalid" do
+      Workflow.set_workflow_file_path("/path/to/nowhere/WORKFLOW.md")
+      assert {:error, _} = WorkflowStore.force_reload()
+    end
+  end
+
+  describe "polling errors" do
+    test "ignores errors during poll and stays alive", %{workflow_file: workflow_file} do
+      # Verify initial state
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+
+      # Write invalid content
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+
+      # Send a poll message manually
+      send(Process.whereis(WorkflowStore), :poll)
+
+      # Yield to let GenServer process message
+      :sys.get_state(SymphonyElixir.WorkflowStore)
+
+      # GenServer should still be alive
+      assert Process.whereis(WorkflowStore)
+
+      # And should still return last good config
+      {:ok, ^workflow} = WorkflowStore.current()
+    end
+  end
 end
