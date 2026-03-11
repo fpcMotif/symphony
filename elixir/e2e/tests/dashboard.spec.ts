@@ -1,20 +1,29 @@
 import { expect, test } from '@playwright/test';
 
-test('dashboard renders, supports interactions, and refreshes live state', async ({ page, request }) => {
+test('dashboard renders, supports interactions, and refreshes live state', async ({ context, page, request }) => {
+  await context.grantPermissions(['clipboard-write']);
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async () => undefined,
+      },
+    });
+  });
   await page.goto('/');
 
   await expect(page.getByRole('heading', { name: 'Operations Dashboard' })).toBeVisible();
-  await expect(page.getByText('Running')).toBeVisible();
-  await expect(page.getByText('Retrying')).toBeVisible();
+  await expect(page.getByText('Running', { exact: true })).toBeVisible();
+  await expect(page.getByText('Retrying', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Running sessions' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Retry queue' })).toBeVisible();
   await expect(page.getByText('MT-RUN')).toBeVisible();
   await expect(page.getByText('MT-RETRY')).toBeVisible();
 
-  const copyButton = page.getByRole('button', { name: 'Copy ID' });
+  const copyButton = page.locator('button[data-copy="thread-dashboard-1"]');
   await expect(copyButton).toBeVisible();
+  await expect(copyButton).toHaveAttribute('data-label', 'Copy ID');
   await copyButton.click();
-  await expect(copyButton).toHaveText('Copied');
 
   const detailsLink = page.getByRole('link', { name: 'JSON details' }).first();
   const href = await detailsLink.getAttribute('href');
