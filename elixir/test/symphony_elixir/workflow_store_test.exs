@@ -117,4 +117,56 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  describe "without GenServer running" do
+    setup do
+      # Stop the GenServer so we can test fallback behavior
+      if pid = Process.whereis(WorkflowStore) do
+        Process.exit(pid, :kill)
+        # Wait for the process to die
+        Process.sleep(10)
+        # Double check it is dead
+        if Process.whereis(WorkflowStore) do
+          Process.unregister(WorkflowStore)
+        end
+      end
+      :ok
+    end
+
+    test "current/0 loads the workflow directly" do
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+    end
+
+    test "force_reload/0 loads the workflow directly" do
+      assert :ok = WorkflowStore.force_reload()
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+    end
+
+    test "force_reload/0 handles invalid workflow directly", %{workflow_file: workflow_file} do
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+      assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.force_reload()
+    end
+
+    test "start_link/0 with default arguments starts the GenServer" do
+      {:ok, pid} = WorkflowStore.start_link()
+      assert is_pid(pid)
+      assert Process.whereis(WorkflowStore) == pid
+      # Stop it again so it doesn't leak
+      Process.exit(pid, :kill)
+    end
+
+    test "init/1 returns an error if workflow is initially invalid", %{workflow_file: workflow_file} do
+      Process.flag(:trap_exit, true)
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+      assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.start_link()
+    end
+  end
+
+  test "handle_info(:poll) gracefully handles error state", %{workflow_file: workflow_file} do
+    File.write!(workflow_file, "---\ninvalid yaml\n---")
+    send(Process.whereis(WorkflowStore), :poll)
+    assert Process.alive?(Process.whereis(WorkflowStore))
+  end
 end
