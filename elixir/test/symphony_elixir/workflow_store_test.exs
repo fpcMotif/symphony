@@ -117,4 +117,89 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  test "start_link/1 fails if the workflow file is missing", %{workflow_file: workflow_file} do
+    if Process.whereis(WorkflowStore) do
+      try do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      catch
+        :exit, _ -> :ok
+      end
+
+      stop_supervised(WorkflowStore)
+    end
+
+    File.rm!(workflow_file)
+
+    Process.flag(:trap_exit, true)
+    assert {:error, {:missing_workflow_file, ^workflow_file, :enoent}} = WorkflowStore.start_link()
+  end
+
+  test "start_link/1 fails if the workflow file has invalid yaml", %{workflow_file: workflow_file} do
+    if Process.whereis(WorkflowStore) do
+      try do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      catch
+        :exit, _ -> :ok
+      end
+
+      stop_supervised(WorkflowStore)
+    end
+
+    File.write!(workflow_file, "---\ninvalid yaml\n---")
+
+    Process.flag(:trap_exit, true)
+    assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.start_link()
+  end
+
+  test "current/0 loads workflow directly if GenServer is not running" do
+    if Process.whereis(WorkflowStore) do
+      try do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      catch
+        :exit, _ -> :ok
+      end
+
+      stop_supervised(WorkflowStore)
+    end
+
+    assert nil == Process.whereis(WorkflowStore)
+
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+  end
+
+  test "force_reload/0 loads workflow directly if GenServer is not running" do
+    if Process.whereis(WorkflowStore) do
+      try do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      catch
+        :exit, _ -> :ok
+      end
+
+      stop_supervised(WorkflowStore)
+    end
+
+    assert nil == Process.whereis(WorkflowStore)
+
+    assert :ok = WorkflowStore.force_reload()
+  end
+
+  test "force_reload/0 returns error if workflow file is invalid and GenServer is not running", %{workflow_file: workflow_file} do
+    if Process.whereis(WorkflowStore) do
+      try do
+        Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+      catch
+        :exit, _ -> :ok
+      end
+
+      stop_supervised(WorkflowStore)
+    end
+
+    assert nil == Process.whereis(WorkflowStore)
+
+    File.write!(workflow_file, "---\ninvalid yaml\n---")
+
+    assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.force_reload()
+  end
 end
