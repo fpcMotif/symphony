@@ -2098,8 +2098,6 @@ Use the same validation profiles as Section 17:
 - TODO: Persist retry queue and session metadata across process restarts.
 - TODO: Make observability settings configurable in workflow front matter without prescribing UI
   implementation details.
-- TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
-  of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.
 
 ### 18.3 Operational Validation Before Production (Recommended)

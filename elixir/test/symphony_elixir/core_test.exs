@@ -203,6 +203,24 @@ defmodule SymphonyElixir.CoreTest do
     GenServer.stop(pid)
   end
 
+  test "orchestrator exposes tracker write APIs" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    issue = %Issue{id: "issue-write", identifier: "MT-WRITE", state: "In Progress"}
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [issue])
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    orchestrator_name = Module.concat(__MODULE__, :WriteApiOrchestrator)
+    start_supervised!({Orchestrator, name: orchestrator_name})
+
+    assert :ok = Orchestrator.create_comment(orchestrator_name, "issue-write", "test comment")
+    assert_receive {:memory_tracker_comment, "issue-write", "test comment"}
+
+    assert :ok = Orchestrator.update_issue_state(orchestrator_name, "issue-write", "Done")
+    assert_receive {:memory_tracker_state_update, "issue-write", "Done"}
+
+    Application.delete_env(:symphony_elixir, :memory_tracker_recipient)
+  end
+
   test "linear issue state reconciliation fetch with no running issues is a no-op" do
     assert {:ok, []} = Client.fetch_issue_states_by_ids([])
   end

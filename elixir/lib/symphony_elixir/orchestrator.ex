@@ -889,10 +889,46 @@ defmodule SymphonyElixir.Orchestrator do
 
   @spec request_refresh(GenServer.server()) :: map() | :unavailable
   def request_refresh(server) do
-    if Process.whereis(server) do
-      GenServer.call(server, :request_refresh)
+    if server_alive?(server) do
+      try do
+        GenServer.call(server, :request_refresh)
+      catch
+        :exit, _ -> :unavailable
+      end
     else
       :unavailable
+    end
+  end
+
+  @doc """
+  Create a comment on a given issue through the orchestrator.
+  """
+  @spec create_comment(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
+  def create_comment(server \\ __MODULE__, issue_id, body) do
+    if server_alive?(server) do
+      try do
+        GenServer.call(server, {:create_comment, issue_id, body}, 15_000)
+      catch
+        :exit, _ -> {:error, :unavailable}
+      end
+    else
+      {:error, :unavailable}
+    end
+  end
+
+  @doc """
+  Update the state of a given issue through the orchestrator.
+  """
+  @spec update_issue_state(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
+  def update_issue_state(server \\ __MODULE__, issue_id, state_name) do
+    if server_alive?(server) do
+      try do
+        GenServer.call(server, {:update_issue_state, issue_id, state_name}, 15_000)
+      catch
+        :exit, _ -> {:error, :unavailable}
+      end
+    else
+      {:error, :unavailable}
     end
   end
 
@@ -901,7 +937,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   @spec snapshot(GenServer.server(), timeout()) :: map() | :timeout | :unavailable
   def snapshot(server, timeout) do
-    if Process.whereis(server) do
+    if server_alive?(server) do
       try do
         GenServer.call(server, :snapshot, timeout)
       catch
@@ -912,6 +948,13 @@ defmodule SymphonyElixir.Orchestrator do
       :unavailable
     end
   end
+
+  defp server_alive?(pid) when is_pid(pid), do: Process.alive?(pid)
+  defp server_alive?(name) when is_atom(name), do: Process.whereis(name) != nil
+  defp server_alive?({:global, name}), do: :global.whereis_name(name) != :undefined
+  defp server_alive?({:via, module, name}), do: module.whereis_name(name) != :undefined
+  defp server_alive?({name, node}) when is_atom(name) and is_atom(node), do: true
+  defp server_alive?(_), do: false
 
   @impl true
   def handle_call(:snapshot, _from, state) do
@@ -982,6 +1025,16 @@ defmodule SymphonyElixir.Orchestrator do
        requested_at: DateTime.utc_now(),
        operations: ["poll", "reconcile"]
      }, state}
+  end
+
+  def handle_call({:create_comment, issue_id, body}, _from, state) do
+    result = Tracker.create_comment(issue_id, body)
+    {:reply, result, state}
+  end
+
+  def handle_call({:update_issue_state, issue_id, state_name}, _from, state) do
+    result = Tracker.update_issue_state(issue_id, state_name)
+    {:reply, result, state}
   end
 
   defp integrate_codex_update(running_entry, %{event: event, timestamp: timestamp} = update) do
