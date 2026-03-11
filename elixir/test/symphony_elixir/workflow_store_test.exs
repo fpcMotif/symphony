@@ -117,4 +117,33 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  test "current/0 falls back to Workflow.load/0 when process is not running" do
+    if Process.whereis(WorkflowStore) do
+      :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+
+      on_exit(fn ->
+        Supervisor.restart_child(SymphonyElixir.Supervisor, WorkflowStore)
+      end)
+    end
+
+    assert Process.whereis(WorkflowStore) == nil
+
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+  end
+
+  test "force_reload/0 falls back to Workflow.load/0 when process is not running" do
+    if Process.whereis(WorkflowStore) do
+      :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+
+      on_exit(fn ->
+        Supervisor.restart_child(SymphonyElixir.Supervisor, WorkflowStore)
+      end)
+    end
+
+    assert Process.whereis(WorkflowStore) == nil
+
+    assert :ok = WorkflowStore.force_reload()
+  end
 end
