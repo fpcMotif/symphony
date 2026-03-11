@@ -587,6 +587,115 @@ defmodule SymphonyElixir.ExtensionsTest do
     end)
   end
 
+  test "dashboard runtime text increases after runtime tick messages" do
+    orchestrator_name = Module.concat(__MODULE__, :RuntimeTickOrchestrator)
+
+    {:ok, _orchestrator_pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot:
+          dashboard_snapshot(
+            running: [
+              %{
+                issue_id: "issue-runtime",
+                identifier: "MT-RUNTIME",
+                state: "In Progress",
+                session_id: "thread-runtime",
+                turn_count: 1,
+                last_codex_event: :notification,
+                last_codex_message: "runtime check",
+                last_codex_timestamp: nil,
+                codex_input_tokens: 1,
+                codex_output_tokens: 2,
+                codex_total_tokens: 3,
+                started_at: DateTime.add(DateTime.utc_now(), -5, :second)
+              }
+            ]
+          ),
+        refresh: %{queued: true, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, view, initial_html} = live(build_conn(), "/")
+    assert initial_html =~ "MT-RUNTIME"
+    assert initial_html =~ "/ 1"
+
+    [initial_runtime_text] = Regex.run(~r/(\d+m \d+s \/ 1)/, initial_html, capture: :all_but_first)
+
+    Process.sleep(1_100)
+    send(view.pid, :runtime_tick)
+
+    assert_eventually(fn ->
+      updated_html = render(view)
+
+      case Regex.run(~r/(\d+m \d+s \/ 1)/, updated_html, capture: :all_but_first) do
+        [updated_runtime_text] -> updated_runtime_text != initial_runtime_text
+        _ -> false
+      end
+    end)
+  end
+
+  test "dashboard liveview renders fallback formatting without crashing" do
+    orchestrator_name = Module.concat(__MODULE__, :FallbackDashboardOrchestrator)
+
+    {:ok, _orchestrator_pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot:
+          dashboard_snapshot(
+            running: [
+              %{
+                issue_id: "issue-fallback",
+                identifier: "MT-FALLBACK",
+                state: "mystery-state",
+                session_id: nil,
+                turn_count: 0,
+                last_codex_event: :notification,
+                last_codex_message: nil,
+                last_codex_timestamp: nil,
+                codex_input_tokens: nil,
+                codex_output_tokens: nil,
+                codex_total_tokens: nil,
+                started_at: "not-an-iso8601-date"
+              }
+            ]
+          ),
+        refresh: %{queued: false, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ "MT-FALLBACK"
+    assert html =~ "<span class=\"state-badge\">"
+    refute html =~ "state-badge-active"
+    refute html =~ "state-badge-danger"
+    refute html =~ "state-badge-warning"
+    assert html =~ "<span class=\"muted\">n/a</span>"
+    assert html =~ "Total: n/a"
+    assert html =~ "In n/a / Out n/a"
+    assert html =~ "0m 0s"
+  end
+
+  test "dashboard shows empty states for running and retry tables" do
+    orchestrator_name = Module.concat(__MODULE__, :EmptyStateDashboardOrchestrator)
+
+    {:ok, _orchestrator_pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: dashboard_snapshot(running: [], retrying: []),
+        refresh: %{queued: true, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+    assert html =~ "No active sessions."
+    assert html =~ "No issues are currently backing off."
+  end
+
   test "dashboard liveview renders an unavailable state without crashing" do
     start_test_endpoint(
       orchestrator: Module.concat(__MODULE__, :MissingDashboardOrchestrator),
@@ -675,7 +784,11 @@ defmodule SymphonyElixir.ExtensionsTest do
   end
 
   defp static_snapshot do
-    %{
+    dashboard_snapshot()
+  end
+
+  defp dashboard_snapshot(overrides \\ []) do
+    base = %{
       running: [
         %{
           issue_id: "issue-http",
@@ -705,6 +818,10 @@ defmodule SymphonyElixir.ExtensionsTest do
       codex_totals: %{input_tokens: 4, output_tokens: 8, total_tokens: 12, seconds_running: 42.5},
       rate_limits: %{"primary" => %{"remaining" => 11}}
     }
+
+    Enum.reduce(overrides, base, fn {key, value}, snapshot ->
+      Map.put(snapshot, key, value)
+    end)
   end
 
   defp wait_for_bound_port do
