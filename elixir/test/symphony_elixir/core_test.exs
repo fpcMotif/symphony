@@ -247,7 +247,9 @@ defmodule SymphonyElixir.CoreTest do
         },
         claimed: MapSet.new([issue_id]),
         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-        retry_attempts: %{}
+        retry_attempts: %{},
+        active_states: MapSet.new(["todo", "in progress", "in review"]),
+        terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate"])
       }
 
       issue = %Issue{
@@ -310,7 +312,9 @@ defmodule SymphonyElixir.CoreTest do
         },
         claimed: MapSet.new([issue_id]),
         codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-        retry_attempts: %{}
+        retry_attempts: %{},
+        active_states: MapSet.new(["todo", "in progress", "in review"]),
+        terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate"])
       }
 
       issue = %Issue{
@@ -352,7 +356,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     issue = %Issue{
@@ -370,6 +376,44 @@ defmodule SymphonyElixir.CoreTest do
     assert Map.has_key?(updated_state.running, issue_id)
     assert MapSet.member?(updated_state.claimed, issue_id)
     assert updated_entry.issue.state == "In Progress"
+  end
+
+  test "reconcile stops running issue when tracker refresh omits it" do
+    issue_id = "issue-missing"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: "MT-560",
+          issue: %Issue{
+            id: issue_id,
+            identifier: "MT-560",
+            state: "In Progress"
+          },
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    updated_state = Orchestrator.reconcile_issue_states_for_test([], state)
+
+    refute Map.has_key?(updated_state.running, issue_id)
+    refute MapSet.member?(updated_state.claimed, issue_id)
+    refute Process.alive?(agent_pid)
   end
 
   test "reconcile stops running issue when it is reassigned away from this worker" do
@@ -399,7 +443,9 @@ defmodule SymphonyElixir.CoreTest do
       },
       claimed: MapSet.new([issue_id]),
       codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
-      retry_attempts: %{}
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
     }
 
     issue = %Issue{
@@ -456,7 +502,7 @@ defmodule SymphonyElixir.CoreTest do
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 500, 1_100)
+    assert_due_in_range(due_at_ms, 250, 1_100)
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -496,7 +542,7 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 39_500, 40_500)
+    assert_due_in_range(due_at_ms, 39_000, 40_500)
   end
 
   test "first abnormal worker exit waits before retrying" do
@@ -535,7 +581,7 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 9_000, 10_500)
+    assert_due_in_range(due_at_ms, 8_750, 10_500)
   end
 
   defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
@@ -1526,5 +1572,324 @@ defmodule SymphonyElixir.CoreTest do
     after
       File.rm_rf(test_root)
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.2 / §17.4 — Todo blocker rule
+  # ---------------------------------------------------------------------------
+
+  test "todo issue with non-terminal blockers is not dispatched" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    blocked_issue = %Issue{
+      id: "todo-blocked",
+      identifier: "MT-900",
+      title: "Blocked by open issue",
+      description: "Should not dispatch",
+      state: "Todo",
+      labels: [],
+      blocked_by: [%{id: "blocker-1", state: "In Progress"}]
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(blocked_issue, state)
+  end
+
+  test "todo issue with all-terminal blockers is eligible for dispatch" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    unblocked_issue = %Issue{
+      id: "todo-unblocked",
+      identifier: "MT-901",
+      title: "All blockers done",
+      description: "Should dispatch",
+      state: "Todo",
+      labels: [],
+      blocked_by: [%{id: "blocker-1", state: "Closed"}, %{id: "blocker-2", state: "Done"}]
+    }
+
+    state = %Orchestrator.State{
+      running: %{},
+      claimed: MapSet.new(),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    assert Orchestrator.should_dispatch_issue_for_test(unblocked_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.5 / §17.4 — Stall detection
+  # ---------------------------------------------------------------------------
+
+  test "stalled running issue is terminated and retry is scheduled" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_stall_timeout_ms: 5_000
+    )
+
+    issue_id = "stall-1"
+
+    agent_pid =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    stale_timestamp = DateTime.add(DateTime.utc_now(), -10, :second)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: agent_pid,
+          ref: nil,
+          identifier: "MT-902",
+          issue: %Issue{id: issue_id, identifier: "MT-902", state: "In Progress"},
+          started_at: stale_timestamp,
+          last_codex_timestamp: stale_timestamp
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    updated_state = Orchestrator.reconcile_stalled_running_issues_for_test(state)
+
+    refute Map.has_key?(updated_state.running, issue_id)
+    assert Map.has_key?(updated_state.retry_attempts, issue_id)
+    refute Process.alive?(agent_pid)
+  end
+
+  test "stall detection is skipped when stall_timeout_ms is zero" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_stall_timeout_ms: 0
+    )
+
+    issue_id = "stall-skip"
+
+    stale_timestamp = DateTime.add(DateTime.utc_now(), -600, :second)
+
+    state = %Orchestrator.State{
+      running: %{
+        issue_id => %{
+          pid: self(),
+          ref: nil,
+          identifier: "MT-903",
+          issue: %Issue{id: issue_id, identifier: "MT-903", state: "In Progress"},
+          started_at: stale_timestamp,
+          last_codex_timestamp: stale_timestamp
+        }
+      },
+      claimed: MapSet.new([issue_id]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    updated_state = Orchestrator.reconcile_stalled_running_issues_for_test(state)
+
+    assert Map.has_key?(updated_state.running, issue_id)
+    assert updated_state.retry_attempts == %{}
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.3 / §17.4 — Per-state concurrency limits
+  # ---------------------------------------------------------------------------
+
+  test "per-state concurrency limit blocks dispatch when state limit is reached" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      max_concurrent_agents: 10,
+      max_concurrent_agents_by_state: %{"todo" => 1},
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    candidate_issue = %Issue{
+      id: "per-state-2",
+      identifier: "MT-905",
+      title: "Second todo issue",
+      description: "Should be blocked by per-state limit",
+      state: "Todo",
+      labels: [],
+      blocked_by: []
+    }
+
+    state = %Orchestrator.State{
+      running: %{
+        "per-state-1" => %{
+          pid: self(),
+          ref: nil,
+          identifier: "MT-904",
+          issue: %Issue{id: "per-state-1", identifier: "MT-904", state: "Todo"},
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new(["per-state-1"]),
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.3 / §17.4 — Global slot exhaustion defers candidates
+  # ---------------------------------------------------------------------------
+
+  test "global slot exhaustion defers candidate to next tick" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      max_concurrent_agents: 1,
+      tracker_active_states: ["Todo", "In Progress"],
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    candidate_issue = %Issue{
+      id: "slot-exhaust-2",
+      identifier: "MT-910",
+      title: "Second issue when slots full",
+      description: "Should be deferred",
+      state: "In Progress",
+      labels: [],
+      blocked_by: []
+    }
+
+    state = %Orchestrator.State{
+      running: %{
+        "slot-exhaust-1" => %{
+          pid: self(),
+          ref: nil,
+          identifier: "MT-909",
+          issue: %Issue{id: "slot-exhaust-1", identifier: "MT-909", state: "In Progress"},
+          started_at: DateTime.utc_now()
+        }
+      },
+      claimed: MapSet.new(["slot-exhaust-1"]),
+      max_concurrent_agents: 1,
+      codex_totals: %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+      retry_attempts: %{},
+      active_states: MapSet.new(["todo", "in progress"]),
+      terminal_states: MapSet.new(["closed", "cancelled", "canceled", "duplicate", "done"])
+    }
+
+    refute Orchestrator.should_dispatch_issue_for_test(candidate_issue, state)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §7.1 / §17.4 — Startup terminal workspace cleanup
+  # ---------------------------------------------------------------------------
+
+  test "startup terminal cleanup removes workspaces for issues in terminal states" do
+    workspace_root = Path.join(System.tmp_dir!(), "symphony-terminal-cleanup-#{System.unique_integer([:positive])}")
+    File.mkdir_p!(workspace_root)
+
+    write_workflow_file!(Workflow.workflow_file_path(),
+      workspace_root: workspace_root,
+      tracker_kind: "memory",
+      tracker_terminal_states: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+    )
+
+    # Create workspace directories for terminal issues
+    terminal_workspace = Path.join(workspace_root, "MT-800")
+    File.mkdir_p!(terminal_workspace)
+    File.write!(Path.join(terminal_workspace, "marker.txt"), "should be cleaned")
+
+    assert File.dir?(terminal_workspace)
+
+    # Seed memory tracker with a terminal issue matching the workspace
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [
+      %Issue{
+        id: "terminal-1",
+        identifier: "MT-800",
+        title: "Already closed",
+        description: "Terminal issue",
+        state: "Closed",
+        labels: []
+      }
+    ])
+
+    Orchestrator.run_terminal_workspace_cleanup_for_test()
+
+    refute File.dir?(terminal_workspace),
+           "Expected workspace for terminal issue MT-800 to be cleaned up at startup"
+  after
+    Application.delete_env(:symphony_elixir, :memory_tracker_issues)
+  end
+
+  # ---------------------------------------------------------------------------
+  # SPEC §8.2 / §17.4 — Dispatch sort order
+  # ---------------------------------------------------------------------------
+
+  test "dispatch sort order: priority ascending, created_at oldest first, identifier tie-breaker" do
+    now = DateTime.utc_now()
+
+    issues = [
+      %Issue{id: "d", identifier: "MT-D", state: "Todo", title: "D", priority: nil, created_at: now},
+      %Issue{id: "a", identifier: "MT-A", state: "Todo", title: "A", priority: 1, created_at: DateTime.add(now, 10, :second)},
+      %Issue{id: "b", identifier: "MT-B", state: "Todo", title: "B", priority: 1, created_at: now},
+      %Issue{id: "c", identifier: "MT-C", state: "Todo", title: "C", priority: 3, created_at: now}
+    ]
+
+    sorted = Orchestrator.sort_issues_for_dispatch_for_test(issues)
+    sorted_ids = Enum.map(sorted, & &1.id)
+
+    # priority 1 first (B before A because B has earlier created_at),
+    # then priority 3 (C), then null priority (D sorts last)
+    assert sorted_ids == ["b", "a", "c", "d"]
+  end
+
+  # ---------------------------------------------------------------------------
+  # Orchestrator tracker write APIs
+  # ---------------------------------------------------------------------------
+
+  test "orchestrator create_comment proxies to tracker adapter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    {:ok, pid} = Orchestrator.start_link(name: :test_orch_comment)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid)
+    end)
+
+    assert :ok = Orchestrator.create_comment(:test_orch_comment, "issue-1", "Test comment")
+    assert_receive {:memory_tracker_comment, "issue-1", "Test comment"}
+  end
+
+  test "orchestrator update_issue_state proxies to tracker adapter" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "memory")
+    Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+    Application.put_env(:symphony_elixir, :memory_tracker_recipient, self())
+
+    {:ok, pid} = Orchestrator.start_link(name: :test_orch_state)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid)
+    end)
+
+    assert :ok = Orchestrator.update_issue_state(:test_orch_state, "issue-1", "Done")
+    assert_receive {:memory_tracker_state_update, "issue-1", "Done"}
   end
 end

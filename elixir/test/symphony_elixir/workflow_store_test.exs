@@ -6,6 +6,20 @@ defmodule SymphonyElixir.WorkflowStoreTest do
 
   import SymphonyElixir.TestSupport, only: [write_workflow_file!: 2]
 
+  defp stop_workflow_store! do
+    # Terminate via the app supervisor (prevents automatic restart)
+    Supervisor.terminate_child(SymphonyElixir.Supervisor, WorkflowStore)
+
+    # Also stop any ExUnit-supervised instance (stop_supervised prevents restart)
+    stop_supervised(WorkflowStore)
+
+    # Final safety: if still registered via another mechanism, force stop
+    if pid = Process.whereis(WorkflowStore) do
+      Process.exit(pid, :kill)
+      Process.sleep(10)
+    end
+  end
+
   setup do
     workflow_root =
       Path.join(
@@ -116,5 +130,78 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     # Calling `current/0` also automatically reloads if the file has changed.
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
+  end
+
+  test "current/0 falls back to Workflow.load when GenServer is not running", %{workflow_file: _workflow_file} do
+    stop_workflow_store!()
+
+    # Should still work via direct load fallback
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+  end
+
+  test "force_reload/0 falls back to Workflow.load when GenServer is not running", %{workflow_file: _workflow_file} do
+    stop_workflow_store!()
+
+    assert :ok = WorkflowStore.force_reload()
+  end
+
+  test "force_reload/0 fallback returns error when workflow file is missing", %{workflow_file: workflow_file} do
+    stop_workflow_store!()
+    File.rm!(workflow_file)
+
+    assert {:error, {:missing_workflow_file, _, :enoent}} = WorkflowStore.force_reload()
+  end
+
+  test "start_link/1 fails when workflow file is missing" do
+    stop_workflow_store!()
+    Process.flag(:trap_exit, true)
+
+    missing_path =
+      Path.join(
+        System.tmp_dir!(),
+        "nonexistent-#{System.unique_integer([:positive])}/WORKFLOW.md"
+      )
+
+    Workflow.set_workflow_file_path(missing_path)
+
+    assert {:error, {:missing_workflow_file, ^missing_path, :enoent}} = WorkflowStore.start_link([])
+  end
+
+  test "start_link/1 fails when workflow file has invalid YAML" do
+    stop_workflow_store!()
+    Process.flag(:trap_exit, true)
+
+    invalid_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-invalid-yaml-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(invalid_root)
+    invalid_path = Path.join(invalid_root, "WORKFLOW.md")
+    File.write!(invalid_path, "---\n- not-a-map\n---\nPrompt body\n")
+    Workflow.set_workflow_file_path(invalid_path)
+
+    assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.start_link([])
+
+    File.rm_rf!(invalid_root)
+  end
+
+  test "handle_info(:poll) handles corrupted workflow file gracefully", %{workflow_file: workflow_file} do
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+
+    # Corrupt the file
+    File.write!(workflow_file, "---\n- not-a-map\n---\nBroken\n")
+
+    # Simulate poll
+    send(Process.whereis(WorkflowStore), :poll)
+    # Give the GenServer time to process
+    Process.sleep(50)
+
+    # Should still serve the last known good workflow
+    {:ok, workflow_after} = WorkflowStore.current()
+    assert workflow_after.prompt == "Initial Prompt"
   end
 end

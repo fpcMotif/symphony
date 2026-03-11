@@ -3,7 +3,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
 
   alias SymphonyElixir.Codex.DynamicTool
 
-  test "tool_specs advertises the linear_graphql input contract" do
+  test "tool_specs advertises the linear_graphql input contract when Linear auth is configured" do
     assert [
              %{
                "description" => description,
@@ -20,6 +20,75 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
            ] = DynamicTool.tool_specs()
 
     assert description =~ "Linear"
+  end
+
+  test "tool_specs hides linear_graphql when the workflow disables it" do
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: false)
+
+    assert DynamicTool.tool_specs() == []
+  end
+
+  test "tool_specs hides linear_graphql when Linear auth is unavailable" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
+
+    assert DynamicTool.tool_specs() == []
+  end
+
+  test "workflow-disabled linear_graphql is rejected as unsupported" do
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: false)
+
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        %{"query" => "query Viewer { viewer { id } }"},
+        linear_client: fn _query, _variables, _opts ->
+          flunk("linear client should not be called when linear_graphql is disabled in workflow config")
+        end
+      )
+
+    assert response["success"] == false
+
+    assert [
+             %{
+               "type" => "inputText",
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => ~s(Unsupported dynamic tool: "linear_graphql".),
+               "supportedTools" => []
+             }
+           }
+  end
+
+  test "disabled linear_graphql is rejected as unsupported" do
+    response =
+      DynamicTool.execute(
+        "linear_graphql",
+        %{"query" => "query Viewer { viewer { id } }"},
+        linear_graphql_enabled: false,
+        linear_client: fn _query, _variables, _opts ->
+          flunk("linear client should not be called when linear_graphql is disabled")
+        end
+      )
+
+    assert response["success"] == false
+
+    assert [
+             %{
+               "type" => "inputText",
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => ~s(Unsupported dynamic tool: "linear_graphql".),
+               "supportedTools" => []
+             }
+           }
   end
 
   test "unsupported tools return a failure payload with the supported tool list" do
@@ -106,9 +175,7 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
     assert response["success"] == true
   end
 
-  test "linear_graphql passes multi-operation documents through unchanged" do
-    test_pid = self()
-
+  test "linear_graphql rejects multi-operation documents before calling Linear" do
     query = """
     query Viewer { viewer { id } }
     query Teams { teams { nodes { id } } }
@@ -118,15 +185,25 @@ defmodule SymphonyElixir.Codex.DynamicToolTest do
       DynamicTool.execute(
         "linear_graphql",
         %{"query" => query},
-        linear_client: fn forwarded_query, variables, opts ->
-          send(test_pid, {:linear_client_called, forwarded_query, variables, opts})
-          {:ok, %{"errors" => [%{"message" => "Must provide operation name if query contains multiple operations."}]}}
+        linear_client: fn _forwarded_query, _variables, _opts ->
+          flunk("linear client should not be called for multi-operation documents")
         end
       )
 
-    assert_received {:linear_client_called, forwarded_query, %{}, []}
-    assert forwarded_query == String.trim(query)
     assert response["success"] == false
+
+    assert [
+             %{
+               "type" => "inputText",
+               "text" => text
+             }
+           ] = response["contentItems"]
+
+    assert Jason.decode!(text) == %{
+             "error" => %{
+               "message" => "`linear_graphql.query` must contain exactly one GraphQL operation."
+             }
+           }
   end
 
   test "linear_graphql rejects blank raw query strings even when using the default client" do

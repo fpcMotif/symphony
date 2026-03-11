@@ -11,6 +11,8 @@ defmodule SymphonyElixir.Codex.AppServer do
   @turn_start_id 3
   @port_line_bytes 1_048_576
   @max_stream_log_bytes 1_000
+  @post_turn_drain_timeout_ms 50
+  @stderr_stream_prefix "__SYMPHONY_STDERR__:"
   @non_interactive_tool_input_answer "This is a non-interactive session. Operator input is unavailable."
 
   @type session :: %{
@@ -101,33 +103,19 @@ defmodule SymphonyElixir.Codex.AppServer do
           metadata
         )
 
-        case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
-          {:ok, result} ->
-            Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
-
-            {:ok,
-             %{
-               result: result,
-               session_id: session_id,
-               thread_id: thread_id,
-               turn_id: turn_id
-             }}
-
-          {:error, reason} ->
-            Logger.warning("Codex session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
-
-            emit_message(
-              on_message,
-              :turn_ended_with_error,
-              %{
-                session_id: session_id,
-                reason: reason
-              },
-              metadata
-            )
-
-            {:error, reason}
-        end
+        await_turn_result(
+          port,
+          on_message,
+          tool_executor,
+          auto_approve_requests,
+          %{
+            issue: issue,
+            metadata: metadata,
+            session_id: session_id,
+            thread_id: thread_id,
+            turn_id: turn_id
+          }
+        )
 
       {:error, reason} ->
         Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
@@ -139,6 +127,74 @@ defmodule SymphonyElixir.Codex.AppServer do
   @spec stop_session(session()) :: :ok
   def stop_session(%{port: port}) when is_port(port) do
     stop_port(port)
+  end
+
+  defp await_turn_result(
+         port,
+         on_message,
+         tool_executor,
+         auto_approve_requests,
+         %{issue: issue, metadata: metadata, session_id: session_id, thread_id: thread_id, turn_id: turn_id}
+       ) do
+    case await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
+      {:ok, result} ->
+        complete_turn_result(
+          port,
+          on_message,
+          issue,
+          metadata,
+          session_id,
+          thread_id,
+          turn_id,
+          result
+        )
+
+      {:error, reason} ->
+        emit_turn_error(on_message, issue, metadata, session_id, reason)
+    end
+  end
+
+  defp complete_turn_result(
+         port,
+         on_message,
+         issue,
+         metadata,
+         session_id,
+         thread_id,
+         turn_id,
+         result
+       ) do
+    case settle_post_turn_output(port, on_message) do
+      :ok ->
+        Logger.info("Codex session completed for #{issue_context(issue)} session_id=#{session_id}")
+
+        {:ok,
+         %{
+           result: result,
+           session_id: session_id,
+           thread_id: thread_id,
+           turn_id: turn_id
+         }}
+
+      {:error, reason} ->
+        emit_turn_error(on_message, issue, metadata, session_id, reason)
+    end
+  end
+
+  defp emit_turn_error(on_message, issue, metadata, session_id, reason) do
+    Logger.warning("Codex session ended with error for #{issue_context(issue)} session_id=#{session_id}: #{inspect(reason)}")
+
+    emit_message(
+      on_message,
+      :turn_ended_with_error,
+      %{
+        session_id: session_id,
+        reason: reason
+      },
+      metadata
+    )
+
+    {:error, reason}
   end
 
   defp validate_workspace_cwd(workspace) when is_binary(workspace) do
@@ -171,8 +227,7 @@ defmodule SymphonyElixir.Codex.AppServer do
           [
             :binary,
             :exit_status,
-            :stderr_to_stdout,
-            args: [~c"-lc", String.to_charlist(Config.codex_command())],
+            args: [~c"-lc", String.to_charlist(wrap_codex_command(Config.codex_command()))],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]
@@ -180,6 +235,10 @@ defmodule SymphonyElixir.Codex.AppServer do
 
       {:ok, port}
     end
+  end
+
+  defp wrap_codex_command(command) when is_binary(command) do
+    "{ #{command}; } 2> >(while IFS= read -r line; do printf '%s%s\\n' '#{@stderr_stream_prefix}' \"$line\"; done)"
   end
 
   defp port_metadata(port) when is_port(port) do
@@ -281,41 +340,60 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
-    receive do
-      {^port, {:data, {:eol, chunk}}} ->
-        complete_line = pending_line <> to_string(chunk)
-        handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests)
-
-      {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(
+    case pop_buffered_line(port, pending_line) do
+      {:ok, buffered_line} ->
+        handle_incoming(
           port,
           on_message,
+          buffered_line,
           timeout_ms,
-          pending_line <> to_string(chunk),
           tool_executor,
           auto_approve_requests
         )
 
-      {^port, {:exit_status, status}} ->
-        {:error, {:port_exit, status}}
-    after
-      timeout_ms ->
-        {:error, :turn_timeout}
+      :empty ->
+        receive do
+          {^port, {:data, {:eol, chunk}}} ->
+            complete_line = pending_line <> to_string(chunk)
+            handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests)
+
+          {^port, {:data, {:noeol, chunk}}} ->
+            receive_loop(
+              port,
+              on_message,
+              timeout_ms,
+              pending_line <> to_string(chunk),
+              tool_executor,
+              auto_approve_requests
+            )
+
+          {^port, {:exit_status, status}} ->
+            {:error, {:port_exit, status}}
+        after
+          timeout_ms ->
+            {:error, :turn_timeout}
+        end
     end
   end
 
   defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests) do
     payload_string = to_string(data)
 
-    Jason.decode(payload_string)
-    |> handle_decoded(
-      payload_string,
-      port,
-      on_message,
-      timeout_ms,
-      tool_executor,
-      auto_approve_requests
-    )
+    if String.starts_with?(payload_string, @stderr_stream_prefix) do
+      stderr_text = String.replace_prefix(payload_string, @stderr_stream_prefix, "")
+      log_non_json_stream_line(stderr_text, "stderr")
+      receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+    else
+      Jason.decode(payload_string)
+      |> handle_decoded(
+        payload_string,
+        port,
+        on_message,
+        timeout_ms,
+        tool_executor,
+        auto_approve_requests
+      )
+    end
   end
 
   defp handle_decoded(
@@ -637,18 +715,26 @@ defmodule SymphonyElixir.Codex.AppServer do
          on_message,
          metadata,
          _tool_executor,
-         auto_approve_requests
+         _auto_approve_requests
        ) do
-    maybe_auto_answer_tool_request_user_input(
-      port,
-      id,
-      params,
-      payload,
-      payload_string,
-      on_message,
-      metadata,
-      auto_approve_requests
-    )
+    case classify_tool_request_user_input(params) do
+      :option_prompt ->
+        reply_with_non_interactive_tool_input_answer(
+          port,
+          id,
+          params,
+          payload,
+          payload_string,
+          on_message,
+          metadata
+        )
+
+      :approval_prompt ->
+        :input_required
+
+      :freeform_prompt ->
+        :input_required
+    end
   end
 
   defp maybe_handle_approval_request(
@@ -699,84 +785,6 @@ defmodule SymphonyElixir.Codex.AppServer do
     :approval_required
   end
 
-  defp maybe_auto_answer_tool_request_user_input(
-         port,
-         id,
-         params,
-         payload,
-         payload_string,
-         on_message,
-         metadata,
-         true
-       ) do
-    case tool_request_user_input_approval_answers(params) do
-      {:ok, answers, decision} ->
-        send_message(port, %{"id" => id, "result" => %{"answers" => answers}})
-
-        emit_message(
-          on_message,
-          :approval_auto_approved,
-          %{payload: payload, raw: payload_string, decision: decision},
-          metadata
-        )
-
-        :approved
-
-      :error ->
-        reply_with_non_interactive_tool_input_answer(
-          port,
-          id,
-          params,
-          payload,
-          payload_string,
-          on_message,
-          metadata
-        )
-    end
-  end
-
-  defp maybe_auto_answer_tool_request_user_input(
-         port,
-         id,
-         params,
-         payload,
-         payload_string,
-         on_message,
-         metadata,
-         false
-       ) do
-    reply_with_non_interactive_tool_input_answer(
-      port,
-      id,
-      params,
-      payload,
-      payload_string,
-      on_message,
-      metadata
-    )
-  end
-
-  defp tool_request_user_input_approval_answers(%{"questions" => questions}) when is_list(questions) do
-    answers =
-      Enum.reduce_while(questions, %{}, fn question, acc ->
-        case tool_request_user_input_approval_answer(question) do
-          {:ok, question_id, answer_label} ->
-            {:cont, Map.put(acc, question_id, %{"answers" => [answer_label]})}
-
-          :error ->
-            {:halt, :error}
-        end
-      end)
-
-    case answers do
-      :error -> :error
-      answer_map when map_size(answer_map) > 0 -> {:ok, answer_map, "Approve this Session"}
-      _ -> :error
-    end
-  end
-
-  defp tool_request_user_input_approval_answers(_params), do: :error
-
   defp reply_with_non_interactive_tool_input_answer(
          port,
          id,
@@ -804,6 +812,46 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  defp classify_tool_request_user_input(%{"questions" => questions})
+       when is_list(questions) and questions != [] do
+    cond do
+      Enum.any?(questions, &tool_request_approval_question?/1) ->
+        :approval_prompt
+
+      Enum.any?(questions, &tool_request_freeform_question?/1) ->
+        :freeform_prompt
+
+      Enum.all?(questions, &tool_request_option_question?/1) ->
+        :option_prompt
+
+      true ->
+        :freeform_prompt
+    end
+  end
+
+  defp classify_tool_request_user_input(_params), do: :freeform_prompt
+
+  defp tool_request_approval_question?(%{"options" => options}) when is_list(options) do
+    Enum.any?(options, &approval_option?/1)
+  end
+
+  defp tool_request_approval_question?(_question), do: false
+
+  defp tool_request_freeform_question?(%{"options" => nil}), do: true
+  defp tool_request_freeform_question?(%{"options" => []}), do: true
+
+  defp tool_request_freeform_question?(question) when is_map(question) do
+    not Map.has_key?(question, "options")
+  end
+
+  defp tool_request_freeform_question?(_question), do: true
+
+  defp tool_request_option_question?(%{"options" => options}) when is_list(options) do
+    options != [] and not Enum.any?(options, &approval_option?/1)
+  end
+
+  defp tool_request_option_question?(_question), do: false
+
   defp tool_request_user_input_unavailable_answers(%{"questions" => questions}) when is_list(questions) do
     answers =
       Enum.reduce_while(questions, %{}, fn question, acc ->
@@ -830,32 +878,7 @@ defmodule SymphonyElixir.Codex.AppServer do
 
   defp tool_request_user_input_question_id(_question), do: :error
 
-  defp tool_request_user_input_approval_answer(%{"id" => question_id, "options" => options})
-       when is_binary(question_id) and is_list(options) do
-    case tool_request_user_input_approval_option_label(options) do
-      nil -> :error
-      answer_label -> {:ok, question_id, answer_label}
-    end
-  end
-
-  defp tool_request_user_input_approval_answer(_question), do: :error
-
-  defp tool_request_user_input_approval_option_label(options) do
-    options
-    |> Enum.map(&tool_request_user_input_option_label/1)
-    |> Enum.reject(&is_nil/1)
-    |> case do
-      labels ->
-        Enum.find(labels, &(&1 == "Approve this Session")) ||
-          Enum.find(labels, &(&1 == "Approve Once")) ||
-          Enum.find(labels, &approval_option_label?/1)
-    end
-  end
-
-  defp tool_request_user_input_option_label(%{"label" => label}) when is_binary(label), do: label
-  defp tool_request_user_input_option_label(_option), do: nil
-
-  defp approval_option_label?(label) when is_binary(label) do
+  defp approval_option?(%{"label" => label}) when is_binary(label) do
     normalized_label =
       label
       |> String.trim()
@@ -864,8 +887,18 @@ defmodule SymphonyElixir.Codex.AppServer do
     String.starts_with?(normalized_label, "approve") or String.starts_with?(normalized_label, "allow")
   end
 
+  defp approval_option?(_option), do: false
+
   defp await_response(port, request_id) do
-    with_timeout_response(port, request_id, Config.codex_read_timeout_ms(), "")
+    timeout_ms = Config.codex_read_timeout_ms()
+
+    case take_matching_buffered_response(port, request_id) do
+      {:ok, buffered_line} ->
+        handle_response(port, request_id, buffered_line, timeout_ms)
+
+      :error ->
+        with_timeout_response(port, request_id, timeout_ms, "")
+    end
   end
 
   defp with_timeout_response(port, request_id, timeout_ms, pending_line) do
@@ -888,23 +921,32 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp handle_response(port, request_id, data, timeout_ms) do
     payload = to_string(data)
 
-    case Jason.decode(payload) do
-      {:ok, %{"id" => ^request_id, "error" => error}} ->
-        {:error, {:response_error, error}}
+    if String.starts_with?(payload, @stderr_stream_prefix) do
+      payload
+      |> String.replace_prefix(@stderr_stream_prefix, "")
+      |> log_non_json_stream_line("stderr")
 
-      {:ok, %{"id" => ^request_id, "result" => result}} ->
-        {:ok, result}
+      with_timeout_response(port, request_id, timeout_ms, "")
+    else
+      case Jason.decode(payload) do
+        {:ok, %{"id" => ^request_id, "error" => error}} ->
+          {:error, {:response_error, error}}
 
-      {:ok, %{"id" => ^request_id} = response_payload} ->
-        {:error, {:response_error, response_payload}}
+        {:ok, %{"id" => ^request_id, "result" => result}} ->
+          {:ok, result}
 
-      {:ok, %{} = other} ->
-        Logger.debug("Ignoring message while waiting for response: #{inspect(other)}")
-        with_timeout_response(port, request_id, timeout_ms, "")
+        {:ok, %{"id" => ^request_id} = response_payload} ->
+          {:error, {:response_error, response_payload}}
 
-      {:error, _} ->
-        log_non_json_stream_line(payload, "response stream")
-        with_timeout_response(port, request_id, timeout_ms, "")
+        {:ok, %{} = other} ->
+          Logger.debug("Buffering message while waiting for response: #{inspect(other)}")
+          buffer_line(port, payload)
+          with_timeout_response(port, request_id, timeout_ms, "")
+
+        {:error, _} ->
+          log_non_json_stream_line(payload, "response stream")
+          with_timeout_response(port, request_id, timeout_ms, "")
+      end
     end
   end
 
@@ -924,11 +966,118 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
+  defp settle_post_turn_output(port, on_message) when is_port(port) and is_function(on_message, 1) do
+    drain_port_output(port, on_message, @post_turn_drain_timeout_ms, "")
+  end
+
+  defp drain_port_output(port, on_message, timeout_ms, pending_line) do
+    receive do
+      {^port, {:data, {:eol, chunk}}} ->
+        pending_line
+        |> Kernel.<>(to_string(chunk))
+        |> handle_drained_line(port, on_message)
+        |> case do
+          :ok -> drain_port_output(port, on_message, 0, "")
+          {:error, reason} -> {:error, reason}
+        end
+
+      {^port, {:data, {:noeol, chunk}}} ->
+        drain_port_output(port, on_message, timeout_ms, pending_line <> to_string(chunk))
+
+      {^port, {:exit_status, _status}} ->
+        :ok
+    after
+      timeout_ms ->
+        if pending_line != "" do
+          case handle_drained_line(pending_line, port, on_message) do
+            :ok -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+        else
+          :ok
+        end
+    end
+  end
+
+  defp handle_drained_line(line, port, on_message) do
+    payload_string = to_string(line)
+
+    if String.starts_with?(payload_string, @stderr_stream_prefix) do
+      stderr_text = String.replace_prefix(payload_string, @stderr_stream_prefix, "")
+      log_non_json_stream_line(stderr_text, "stderr")
+      :ok
+    else
+      case Jason.decode(payload_string) do
+        {:ok, %{"method" => method} = payload} when is_binary(method) ->
+          handle_post_turn_message(port, on_message, payload, payload_string)
+
+        {:error, _reason} ->
+          log_non_json_stream_line(payload_string, "turn stream")
+          :ok
+
+        _ ->
+          :ok
+      end
+    end
+  end
+
+  defp handle_post_turn_message(
+         port,
+         on_message,
+         %{"method" => "item/tool/requestUserInput"} = payload,
+         payload_string
+       ) do
+    emit_message(
+      on_message,
+      :turn_input_required,
+      %{payload: payload, raw: payload_string},
+      metadata_from_message(port, payload)
+    )
+
+    {:error, {:turn_input_required, payload}}
+  end
+
+  defp handle_post_turn_message(port, on_message, %{"method" => method} = payload, payload_string) do
+    metadata = metadata_from_message(port, payload)
+
+    cond do
+      method in [
+        "item/commandExecution/requestApproval",
+        "execCommandApproval",
+        "applyPatchApproval",
+        "item/fileChange/requestApproval"
+      ] ->
+        emit_message(
+          on_message,
+          :approval_required,
+          %{payload: payload, raw: payload_string},
+          metadata
+        )
+
+        {:error, {:approval_required, payload}}
+
+      needs_input?(method, payload) ->
+        emit_message(
+          on_message,
+          :turn_input_required,
+          %{payload: payload, raw: payload_string},
+          metadata
+        )
+
+        {:error, {:turn_input_required, payload}}
+
+      true ->
+        :ok
+    end
+  end
+
   defp issue_context(%{id: issue_id, identifier: identifier}) do
     "issue_id=#{issue_id} issue_identifier=#{identifier}"
   end
 
   defp stop_port(port) when is_port(port) do
+    clear_buffered_lines(port)
+
     case :erlang.port_info(port) do
       :undefined ->
         :ok
@@ -992,6 +1141,67 @@ defmodule SymphonyElixir.Codex.AppServer do
     line = Jason.encode!(message) <> "\n"
     Port.command(port, line)
   end
+
+  defp pop_buffered_line(_port, pending_line) when pending_line != "", do: :empty
+
+  defp pop_buffered_line(port, "") do
+    key = buffered_lines_key(port)
+
+    case Process.get(key, []) do
+      [line | rest] ->
+        Process.put(key, rest)
+        {:ok, line}
+
+      _ ->
+        :empty
+    end
+  end
+
+  defp take_matching_buffered_response(port, request_id) do
+    key = buffered_lines_key(port)
+    lines = Process.get(key, [])
+
+    case split_buffered_response(lines, request_id, []) do
+      {:ok, line, rest} ->
+        Process.put(key, rest)
+        {:ok, line}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp split_buffered_response([], _request_id, _acc), do: :error
+
+  defp split_buffered_response([line | rest], request_id, acc) do
+    if response_matches_request?(line, request_id) do
+      {:ok, line, Enum.reverse(acc, rest)}
+    else
+      split_buffered_response(rest, request_id, [line | acc])
+    end
+  end
+
+  defp response_matches_request?(line, request_id) when is_binary(line) do
+    case Jason.decode(line) do
+      {:ok, %{"id" => ^request_id}} -> true
+      _ -> false
+    end
+  end
+
+  defp response_matches_request?(_line, _request_id), do: false
+
+  defp buffer_line(port, line) when is_port(port) and is_binary(line) do
+    key = buffered_lines_key(port)
+    lines = Process.get(key, [])
+    Process.put(key, lines ++ [line])
+  end
+
+  defp clear_buffered_lines(port) when is_port(port) do
+    Process.delete(buffered_lines_key(port))
+    :ok
+  end
+
+  defp buffered_lines_key(port) when is_port(port), do: {:codex_app_server_buffer, port}
 
   defp needs_input?(method, payload)
        when is_binary(method) and is_map(payload) do

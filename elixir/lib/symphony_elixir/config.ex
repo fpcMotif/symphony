@@ -32,6 +32,7 @@ defmodule SymphonyElixir.Config do
   @default_codex_turn_timeout_ms 3_600_000
   @default_codex_read_timeout_ms 5_000
   @default_codex_stall_timeout_ms 300_000
+  @default_codex_linear_graphql_enabled true
   @default_codex_approval_policy %{
     "reject" => %{
       "sandbox_approval" => true,
@@ -116,6 +117,10 @@ defmodule SymphonyElixir.Config do
                                  stall_timeout_ms: [
                                    type: :integer,
                                    default: @default_codex_stall_timeout_ms
+                                 ],
+                                 linear_graphql_enabled: [
+                                   type: :boolean,
+                                   default: @default_codex_linear_graphql_enabled
                                  ]
                                ]
                              ],
@@ -319,6 +324,11 @@ defmodule SymphonyElixir.Config do
     |> max(0)
   end
 
+  @spec codex_linear_graphql_enabled?() :: boolean()
+  def codex_linear_graphql_enabled? do
+    get_in(validated_workflow_options(), [:codex, :linear_graphql_enabled])
+  end
+
   @spec workflow_prompt() :: String.t()
   def workflow_prompt do
     case current_workflow() do
@@ -494,6 +504,7 @@ defmodule SymphonyElixir.Config do
     |> put_if_present(:turn_timeout_ms, integer_value(Map.get(section, "turn_timeout_ms")))
     |> put_if_present(:read_timeout_ms, integer_value(Map.get(section, "read_timeout_ms")))
     |> put_if_present(:stall_timeout_ms, integer_value(Map.get(section, "stall_timeout_ms")))
+    |> put_if_present(:linear_graphql_enabled, boolean_value(Map.get(section, "linear_graphql_enabled")))
   end
 
   defp extract_hooks_options(section) do

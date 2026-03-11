@@ -36,8 +36,7 @@ defmodule SymphonyElixir.Workspace do
         {:ok, false}
 
       File.exists?(workspace) ->
-        File.rm_rf!(workspace)
-        create_workspace(workspace)
+        {:error, {:workspace_path_not_directory, Path.expand(workspace)}}
 
       true ->
         create_workspace(workspace)
