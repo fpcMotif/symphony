@@ -62,7 +62,8 @@ defmodule SymphonyElixir.HttpServer do
 
   defp parse_host({_, _, _, _} = ip), do: {:ok, ip}
   defp parse_host({_, _, _, _, _, _, _, _} = ip), do: {:ok, ip}
-
+  defp parse_host(""), do: {:ok, {127, 0, 0, 1}}
+  defp parse_host(nil), do: {:ok, {127, 0, 0, 1}}
   defp parse_host(host) when is_binary(host) do
     charhost = String.to_charlist(host)
 
@@ -78,11 +79,10 @@ defmodule SymphonyElixir.HttpServer do
     end
   end
 
-  defp normalize_host(host) when host in ["", nil], do: "127.0.0.1"
-  defp normalize_host(host) when is_binary(host), do: host
   defp normalize_host({_, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
   defp normalize_host({_, _, _, _, _, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
-  defp normalize_host(host), do: to_string(host)
+  defp normalize_host(host) when is_binary(host), do: host
+  defp normalize_host(nil), do: "127.0.0.1"
 
   defp secret_key_base do
     Base.encode64(:crypto.strong_rand_bytes(@secret_key_bytes), padding: false)

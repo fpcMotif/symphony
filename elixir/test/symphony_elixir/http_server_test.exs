@@ -25,20 +25,82 @@ defmodule SymphonyElixir.HttpServerTest do
 
     # Cleanup
     # Stop the endpoint if it was started
-    GenServer.stop(Endpoint)
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
   end
 
   test "start_link/1 parses various host formats" do
     # Testing host string
     assert {:ok, _} = HttpServer.start_link(port: 0, host: "127.0.0.1")
-    GenServer.stop(Endpoint)
+
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
 
     # Testing host tuple
     assert {:ok, _} = HttpServer.start_link(port: 0, host: {127, 0, 0, 1})
-    GenServer.stop(Endpoint)
+
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
 
     # Testing localhost
     assert {:ok, _} = HttpServer.start_link(port: 0, host: "localhost")
-    GenServer.stop(Endpoint)
+
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
+
+    # Testing IPv6 tuple
+    assert {:ok, _} = HttpServer.start_link(port: 0, host: {0, 0, 0, 0, 0, 0, 0, 1})
+
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
+  test "start_link/1 returns :ignore if port is negative" do
+    assert HttpServer.start_link(port: -1) == :ignore
+  end
+
+  test "start_link/1 handles custom snapshot_timeout_ms" do
+    assert {:ok, _pid} = HttpServer.start_link(port: 0, snapshot_timeout_ms: 20_000)
+
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
+  end
+
+  test "bound_port/1 returns nil when server is not running" do
+    try do
+      GenServer.stop(Endpoint)
+    catch
+      :exit, _ -> :ok
+    end
+
+    assert HttpServer.bound_port() == nil
+  end
+
+  test "start_link/1 ignores invalid hosts" do
+    assert {:error, _} = HttpServer.start_link(port: 0, host: "invalid.hostname.local")
+  end
+
+  test "start_link/1 handles atom host and normalize fallback" do
+    assert_raise FunctionClauseError, fn ->
+      HttpServer.start_link(port: 0, host: :localhost)
+    end
   end
 end
