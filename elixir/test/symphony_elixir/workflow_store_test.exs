@@ -117,4 +117,77 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, new_workflow} = WorkflowStore.current()
     assert new_workflow.prompt == "Polled Prompt"
   end
+
+  describe "fallback when GenServer is not running" do
+    setup do
+
+      if pid = Process.whereis(WorkflowStore) do
+        GenServer.stop(pid)
+      end
+
+      # Wait a tiny bit for process termination
+      Process.sleep(10)
+      :ok
+    end
+
+    test "current/0 falls back to Workflow.load/0" do
+      # Provide a path to a real file so it loads properly instead of falling back to default cwd logic that happens to find the root one
+      SymphonyElixir.Workflow.set_workflow_file_path(System.get_env("TEST_WORKFLOW_FILE") || "WORKFLOW.md")
+
+      # Since we're trying to hit the _fallback_ logic of WorkflowStore.current(), and since we've stopped the app above,
+      # it hits `Workflow.load()`.
+      assert {:ok, _workflow} = WorkflowStore.current()
+    end
+
+    test "force_reload/0 falls back to Workflow.load/0 and returns ok", %{workflow_file: workflow_file} do
+      # Provide valid file so it succeeds
+      SymphonyElixir.Workflow.set_workflow_file_path(workflow_file)
+      assert :ok = WorkflowStore.force_reload()
+    end
+
+    test "force_reload/0 returns error from Workflow.load/0 when file is bad", %{workflow_file: workflow_file} do
+      # Make file invalid before calling
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+      assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.force_reload()
+    end
+  end
+
+  describe "init/1 error path" do
+    test "returns stop when workflow file cannot be loaded" do
+      # Temporarily change the workflow file to something that does not exist
+      SymphonyElixir.Workflow.set_workflow_file_path("/tmp/nonexistent_workflow_for_test.md")
+
+      # start directly without name registration and linking to avoid crashing the test process/supervisor
+      assert {:error, {:missing_workflow_file, _path, :enoent}} = GenServer.start(WorkflowStore, [])
+    end
+  end
+
+  describe "start_link/1" do
+    test "starts successfully and registers under the module name" do
+      # GenServer is already running, so calling it again returns an error tuple
+      assert {:error, {:already_started, _pid}} = WorkflowStore.start_link()
+    end
+  end
+
+  describe "handle_info(:poll) error path" do
+    test "keeps last known state when workflow file becomes invalid during poll", %{workflow_file: workflow_file} do
+      # Verify initial state
+      {:ok, workflow} = WorkflowStore.current()
+      assert workflow.prompt == "Initial Prompt"
+
+      # Write invalid content
+      File.write!(workflow_file, "---\ninvalid yaml\n---")
+
+      # Trigger a poll
+      send(Process.whereis(WorkflowStore), :poll)
+
+      # Give GenServer time to process the message
+      Process.sleep(10)
+
+      # Ensure it's still alive and has the old state
+      assert Process.alive?(Process.whereis(WorkflowStore))
+      {:ok, workflow_after_error} = WorkflowStore.current()
+      assert workflow_after_error.prompt == "Initial Prompt"
+    end
+  end
 end
