@@ -282,6 +282,11 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
+  def choose_issues_for_test(issues, state) do
+    choose_issues(issues, state)
+  end
+
+  @doc false
   @spec sort_issues_for_dispatch_for_test([Issue.t()]) :: [Issue.t()]
   def sort_issues_for_dispatch_for_test(issues) when is_list(issues) do
     sort_issues_for_dispatch(issues)
