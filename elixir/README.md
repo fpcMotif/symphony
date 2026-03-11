@@ -170,6 +170,12 @@ The observability UI now runs on a minimal Phoenix stack:
 make all
 ```
 
+Run only the end-to-end orchestration scenarios:
+
+```bash
+mix test test/symphony_elixir/orchestration_e2e_test.exs --only e2e
+```
+
 ## FAQ
 
 ### Why Elixir?
