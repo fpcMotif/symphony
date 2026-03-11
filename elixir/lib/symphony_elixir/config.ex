@@ -935,4 +935,9 @@ defmodule SymphonyElixir.Config do
   end
 
   defp normalize_secret_value(_value), do: nil
+
+  @spec data_dir() :: Path.t()
+  def data_dir do
+    Path.join([workspace_root(), ".symphony_data"])
+  end
 end

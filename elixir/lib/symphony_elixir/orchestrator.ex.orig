@@ -85,7 +85,6 @@ defmodule SymphonyElixir.Orchestrator do
     state = %{state | poll_check_in_progress: true, next_poll_due_at_ms: nil}
 
     notify_dashboard()
-    save_state(state)
     :ok = schedule_poll_cycle_start()
     {:noreply, state}
   end
