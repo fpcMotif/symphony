@@ -272,7 +272,13 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    should_dispatch_issue?(issue, state, active_state_set(), terminal_state_set())
+    running_counts =
+      Enum.reduce(state.running, %{}, fn {_id, %{issue: %Issue{state: state_name}}}, acc ->
+        normalized = normalize_issue_state(state_name)
+        Map.update(acc, normalized, 1, &(&1 + 1))
+      end)
+
+    should_dispatch_issue?(issue, state, running_counts, active_state_set(), terminal_state_set())
   end
 
   @doc false
@@ -441,16 +447,26 @@ defmodule SymphonyElixir.Orchestrator do
     active_states = active_state_set()
     terminal_states = terminal_state_set()
 
-    {candidates, _final_state} =
+    running_counts =
+      Enum.reduce(state.running, %{}, fn {_id, %{issue: %Issue{state: state_name}}}, acc ->
+        normalized = normalize_issue_state(state_name)
+        Map.update(acc, normalized, 1, &(&1 + 1))
+      end)
+
+    {candidates, _final_state, _final_counts} =
       issues
       |> sort_issues_for_dispatch()
-      |> Enum.reduce({[], state}, fn issue, {candidates, state_acc} ->
-        if should_dispatch_issue?(issue, state_acc, active_states, terminal_states) do
+      |> Enum.reduce({[], state, running_counts}, fn issue, {candidates, state_acc, counts_acc} ->
+        if should_dispatch_issue?(issue, state_acc, counts_acc, active_states, terminal_states) do
           temp_running = Map.put(state_acc.running, issue.id, %{issue: issue})
           temp_state = %{state_acc | running: temp_running, claimed: MapSet.put(state_acc.claimed, issue.id)}
-          {[issue | candidates], temp_state}
+
+          normalized_issue_state = normalize_issue_state(issue.state)
+          temp_counts = Map.update(counts_acc, normalized_issue_state, 1, &(&1 + 1))
+
+          {[issue | candidates], temp_state, temp_counts}
         else
-          {candidates, state_acc}
+          {candidates, state_acc, counts_acc}
         end
       end)
 
@@ -515,6 +531,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp should_dispatch_issue?(
          %Issue{} = issue,
          %State{running: running, claimed: claimed} = state,
+         running_counts,
          active_states,
          terminal_states
        ) do
@@ -523,29 +540,22 @@ defmodule SymphonyElixir.Orchestrator do
       !MapSet.member?(claimed, issue.id) and
       !Map.has_key?(running, issue.id) and
       available_slots(state) > 0 and
-      state_slots_available?(issue, running)
+      state_slots_available?(issue, running_counts)
   end
 
-  defp should_dispatch_issue?(_issue, _state, _active_states, _terminal_states), do: false
+  defp should_dispatch_issue?(_issue, _state, _running_counts, _active_states, _terminal_states), do: false
 
-  defp state_slots_available?(%Issue{state: issue_state}, running) when is_map(running) do
+  defp state_slots_available?(%Issue{state: issue_state}, running_counts) when is_map(running_counts) do
     limit = Config.max_concurrent_agents_for_state(issue_state)
-    used = running_issue_count_for_state(running, issue_state)
+    used = running_issue_count_for_state(running_counts, issue_state)
     limit > used
   end
 
-  defp state_slots_available?(_issue, _running), do: false
+  defp state_slots_available?(_issue, _running_counts), do: false
 
-  defp running_issue_count_for_state(running, issue_state) when is_map(running) do
+  defp running_issue_count_for_state(running_counts, issue_state) when is_map(running_counts) do
     normalized_state = normalize_issue_state(issue_state)
-
-    Enum.count(running, fn
-      {_id, %{issue: %Issue{state: state_name}}} ->
-        normalize_issue_state(state_name) == normalized_state
-
-      _ ->
-        false
-    end)
+    Map.get(running_counts, normalized_state, 0)
   end
 
   defp candidate_issue?(
