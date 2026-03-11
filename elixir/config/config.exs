@@ -11,6 +11,6 @@ config :symphony_elixir, SymphonyElixirWeb.Endpoint,
   ],
   pubsub_server: SymphonyElixir.PubSub,
   live_view: [signing_salt: "symphony-live-view"],
-  secret_key_base: String.duplicate("s", 64),
+  secret_key_base: System.fetch_env!("SECRET_KEY_BASE"),
   check_origin: false,
   server: false
