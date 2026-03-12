@@ -281,6 +281,7 @@ defmodule SymphonyElixir.Config.Schema do
     config
     |> normalize_keys()
     |> drop_nil_values()
+    |> normalize_linear_graphql_enabled_compat()
     |> changeset()
     |> apply_action(:validate)
     |> case do
@@ -415,6 +416,36 @@ defmodule SymphonyElixir.Config.Schema do
 
   defp drop_nil_values(value) when is_list(value), do: Enum.map(value, &drop_nil_values/1)
   defp drop_nil_values(value), do: value
+
+  defp normalize_linear_graphql_enabled_compat(%{"codex" => codex} = config) when is_map(codex) do
+    case Map.fetch(codex, "linear_graphql_enabled") do
+      {:ok, value} ->
+        normalized_codex =
+          case normalize_linear_graphql_enabled_value(value) do
+            :drop -> Map.delete(codex, "linear_graphql_enabled")
+            normalized -> Map.put(codex, "linear_graphql_enabled", normalized)
+          end
+
+        Map.put(config, "codex", normalized_codex)
+
+      :error ->
+        config
+    end
+  end
+
+  defp normalize_linear_graphql_enabled_compat(config), do: config
+
+  defp normalize_linear_graphql_enabled_value(value) when is_boolean(value), do: value
+
+  defp normalize_linear_graphql_enabled_value(value) when is_binary(value) do
+    case String.downcase(String.trim(value)) do
+      "true" -> true
+      "false" -> false
+      _ -> :drop
+    end
+  end
+
+  defp normalize_linear_graphql_enabled_value(_value), do: :drop
 
   defp resolve_secret_setting(nil, fallback), do: normalize_secret_value(fallback)
 

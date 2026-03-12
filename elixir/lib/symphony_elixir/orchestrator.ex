@@ -233,6 +233,7 @@ defmodule SymphonyElixir.Orchestrator do
 
   def handle_info({:retry_issue, issue_id, retry_token}, state) do
     state = refresh_runtime_config(state)
+
     result =
       case pop_retry_attempt_state(state, issue_id, retry_token) do
         {:ok, attempt, metadata, state} -> handle_retry_issue(state, issue_id, attempt, metadata)
@@ -407,8 +408,6 @@ defmodule SymphonyElixir.Orchestrator do
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
   end
-
-  defp reconcile_running_issue_states([], state, _active_states, _terminal_states), do: state
 
   defp reconcile_running_issue_states(issues, state, active_states, terminal_states)
        when is_list(issues) do
@@ -1906,12 +1905,14 @@ defmodule SymphonyElixir.Orchestrator do
         |> Map.get("retry_attempts", %{})
         |> Map.new(fn {issue_id, retry} ->
           due_in_ms = Map.get(retry, :due_in_ms, 0)
-          timer_ref = Process.send_after(self(), {:retry_issue, issue_id}, due_in_ms)
+          retry_token = make_ref()
+          timer_ref = Process.send_after(self(), {:retry_issue, issue_id, retry_token}, due_in_ms)
 
           {issue_id,
            retry
-           |> Map.drop([:due_in_ms])
+           |> Map.drop([:due_in_ms, :retry_token])
            |> Map.put(:due_at_ms, now_ms + due_in_ms)
+           |> Map.put(:retry_token, retry_token)
            |> Map.put(:timer_ref, timer_ref)}
         end)
 

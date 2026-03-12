@@ -836,8 +836,7 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     refute Config.settings!().codex.linear_graphql_enabled
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "bad")
-    assert {:error, {:invalid_workflow_config, msg}} = Config.settings()
-    assert msg =~ "linear_graphql_enabled"
+    assert Config.settings!().codex.linear_graphql_enabled
 
     write_workflow_file!(Workflow.workflow_file_path(),
       tracker_active_states: %{todo: true},

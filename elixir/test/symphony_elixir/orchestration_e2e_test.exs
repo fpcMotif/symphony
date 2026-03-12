@@ -231,7 +231,14 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         snapshot != :timeout and snapshot.retrying != []
       end)
 
-      send(pid, {:retry_issue, issue.id})
+      first_retry_token =
+        :sys.get_state(pid)
+        |> Map.fetch!(:retry_attempts)
+        |> get_in([issue.id, :retry_token])
+
+      assert is_reference(first_retry_token)
+
+      send(pid, {:retry_issue, issue.id, first_retry_token})
 
       assert_eventually(fn ->
         snapshot = Orchestrator.snapshot(orchestrator_name, 1_000)
@@ -241,7 +248,14 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         end)
       end)
 
-      send(pid, {:retry_issue, issue.id})
+      second_retry_token =
+        :sys.get_state(pid)
+        |> Map.fetch!(:retry_attempts)
+        |> get_in([issue.id, :retry_token])
+
+      assert is_reference(second_retry_token)
+
+      send(pid, {:retry_issue, issue.id, second_retry_token})
 
       assert_eventually(fn ->
         snapshot = Orchestrator.snapshot(orchestrator_name, 1_000)
