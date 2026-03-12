@@ -168,6 +168,25 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     assert {:error, {:missing_workflow_file, ^missing_path, :enoent}} = WorkflowStore.start_link([])
   end
 
+  test "start_link/0 fails when workflow file has invalid YAML" do
+    stop_workflow_store!()
+    Process.flag(:trap_exit, true)
+
+    invalid_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-invalid-yaml-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(invalid_root)
+    invalid_path = Path.join(invalid_root, "WORKFLOW.md")
+    File.write!(invalid_path, "---\n- not-a-map\n---\nPrompt body\n")
+    Workflow.set_workflow_file_path(invalid_path)
+
+    assert {:error, :workflow_front_matter_not_a_map} = WorkflowStore.start_link()
+
+    File.rm_rf!(invalid_root)
+  end
   test "start_link/1 fails when workflow file has invalid YAML" do
     stop_workflow_store!()
     Process.flag(:trap_exit, true)
