@@ -78,6 +78,16 @@ defmodule SymphonyElixir.Orchestrator do
     run_terminal_workspace_cleanup()
     :ok = schedule_tick(0)
 
+    state = restore_state(state)
+
+    # In test mode, we do not want to automatically restore global state across different test cases
+    state =
+      if Application.get_env(:symphony_elixir, :skip_persistence, false) do
+        %{state | codex_totals: @empty_codex_totals, retry_attempts: %{}, codex_rate_limits: nil}
+      else
+        state
+      end
+
     {:ok, state}
   end
 
@@ -101,7 +111,7 @@ defmodule SymphonyElixir.Orchestrator do
     state = %{state | poll_check_in_progress: false, next_poll_due_at_ms: next_poll_due_at_ms}
 
     notify_dashboard()
-    {:noreply, state}
+    {:noreply, save_state(state)}
   end
 
   def handle_info(
@@ -143,7 +153,7 @@ defmodule SymphonyElixir.Orchestrator do
         Logger.info("Agent task finished for issue_id=#{issue_id} session_id=#{session_id} reason=#{inspect(reason)}")
 
         notify_dashboard()
-        {:noreply, state}
+        {:noreply, save_state(state)}
     end
   end
 
@@ -164,7 +174,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> apply_codex_rate_limits(update)
 
         notify_dashboard()
-        {:noreply, %{state | running: Map.put(running, issue_id, updated_running_entry)}}
+        {:noreply, save_state(%{state | running: Map.put(running, issue_id, updated_running_entry)})}
     end
   end
 
@@ -180,7 +190,10 @@ defmodule SymphonyElixir.Orchestrator do
       end
 
     notify_dashboard()
-    result
+
+    case result do
+      {:noreply, updated_state} -> {:noreply, save_state(updated_state)}
+    end
   end
 
   def handle_info(msg, state) do
@@ -1594,4 +1607,61 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp integer_like(_value), do: nil
+
+  defp save_state(%State{} = state) do
+    stripped_running =
+      Map.new(state.running, fn {issue_id, metadata} ->
+        {issue_id, Map.drop(metadata, [:pid, :ref, :issue])}
+      end)
+
+    data = %{
+      "running" => stripped_running,
+      "retry_attempts" => state.retry_attempts,
+      "codex_totals" => state.codex_totals,
+      "codex_rate_limits" => state.codex_rate_limits
+    }
+
+    state_file = Config.orchestrator_state_file()
+    File.mkdir_p!(Path.dirname(state_file))
+    File.write!(state_file, :erlang.term_to_binary(data))
+
+    state
+  end
+
+  defp restore_state(%State{} = state) do
+    state_file = Config.orchestrator_state_file()
+
+    with true <- File.exists?(state_file),
+         {:ok, binary} <- File.read(state_file) do
+      data = :erlang.binary_to_term(binary)
+
+      state = %{
+        state
+        | codex_totals: Map.get(data, "codex_totals", state.codex_totals) || state.codex_totals,
+          codex_rate_limits: Map.get(data, "codex_rate_limits", state.codex_rate_limits) || state.codex_rate_limits,
+          retry_attempts: Map.get(data, "retry_attempts", state.retry_attempts) || state.retry_attempts
+      }
+
+      running = Map.get(data, "running", %{})
+
+      # Move running items to retry_attempts with delay_type: :continuation
+      state =
+        Enum.reduce(running, state, fn {issue_id, metadata}, acc_state ->
+          schedule_issue_retry(acc_state, issue_id, Map.get(metadata, :retry_attempt, 1), %{
+            identifier: Map.get(metadata, :identifier),
+            delay_type: :continuation,
+            error: "Orchestrator restarted",
+            session_id: Map.get(metadata, :session_id)
+          })
+        end)
+
+      state
+    else
+      _ -> state
+    end
+  rescue
+    e ->
+      Logger.warning("Failed to restore orchestrator state: #{inspect(e)}")
+      state
+  end
 end
