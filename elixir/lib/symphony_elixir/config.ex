@@ -23,6 +23,7 @@ defmodule SymphonyElixir.Config do
   {% endif %}
   """
   @default_poll_interval_ms 30_000
+  @default_orchestrator_state ".orchestrator_state"
   @default_workspace_root Path.join(System.tmp_dir!(), "symphony_workspaces")
   @default_hook_timeout_ms 60_000
   @default_max_concurrent_agents 10
@@ -234,6 +235,14 @@ defmodule SymphonyElixir.Config do
     validated_workflow_options()
     |> get_in([:workspace, :root])
     |> resolve_path_value(@default_workspace_root)
+  end
+
+  @doc """
+  Returns the absolute path to the orchestrator persistence file.
+  """
+  @spec orchestrator_state_file() :: Path.t()
+  def orchestrator_state_file do
+    Path.join(workspace_root(), @default_orchestrator_state)
   end
 
   @spec workspace_hooks() :: workspace_hooks()

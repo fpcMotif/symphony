@@ -13,3 +13,5 @@ config :symphony_elixir, SymphonyElixirWeb.Endpoint,
   secret_key_base: System.get_env("SECRET_KEY_BASE") || Base.encode64(:crypto.strong_rand_bytes(48), padding: false),
   check_origin: true,
   server: false
+
+config :symphony_elixir, skip_persistence: Mix.env() == :test
