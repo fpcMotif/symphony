@@ -94,6 +94,28 @@ defmodule SymphonyElixir.Tracker.MemoryAdapterTest do
       assert {:ok, result} = Memory.fetch_issues_by_states(["Todo"])
       assert length(result) == 1
     end
+
+    test "handles non-string elements in state list and non-string issue states" do
+      issues = [
+        %Issue{id: "m16", identifier: "M-16", title: "Invalid state type", state: nil},
+        %Issue{id: "m17", identifier: "M-17", title: "Valid state", state: "Todo"}
+      ]
+
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, issues)
+
+      # Non-string states and arguments both normalize to an empty string ("")
+      # so testing for 42 evaluates true for nil
+      assert {:ok, result} = Memory.fetch_issues_by_states([42, "Todo"])
+      assert length(result) == 2
+      ids = Enum.map(result, & &1.id)
+      assert "m16" in ids
+      assert "m17" in ids
+
+      # Exclude non-string arguments
+      assert {:ok, result2} = Memory.fetch_issues_by_states(["Todo"])
+      assert length(result2) == 1
+      assert hd(result2).id == "m17"
+    end
   end
 
   describe "fetch_issue_states_by_ids/1" do
