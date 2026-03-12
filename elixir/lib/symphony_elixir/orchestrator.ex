@@ -812,7 +812,7 @@ defmodule SymphonyElixir.Orchestrator do
     |> MapSet.new()
   end
 
-  defp dispatch_issue(%State{} = state, issue, attempt \\ nil, preferred_worker_host \\ nil) do
+  defp dispatch_issue(%State{} = state, issue, attempt, preferred_worker_host) do
     case revalidate_issue_for_dispatch(
            issue,
            &Tracker.fetch_issue_states_by_ids/1,
