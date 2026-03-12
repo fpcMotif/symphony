@@ -1708,7 +1708,7 @@ defmodule SymphonyElixir.Orchestrator do
         state
         | codex_totals: Map.get(data, "codex_totals", state.codex_totals) || state.codex_totals,
           codex_rate_limits: Map.get(data, "codex_rate_limits", state.codex_rate_limits) || state.codex_rate_limits,
-          retry_attempts: restored_retries || state.retry_attempts
+          retry_attempts: restored_retries
       }
 
       running = Map.get(data, "running", %{})
