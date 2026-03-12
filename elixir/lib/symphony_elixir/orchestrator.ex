@@ -195,6 +195,10 @@ defmodule SymphonyElixir.Orchestrator do
     # filesystem watch events were missed between polling intervals.
     WorkflowStore.force_reload()
 
+    fetch_and_dispatch(state)
+  end
+
+  defp fetch_and_dispatch(%State{} = state) do
     with :ok <- Config.validate!(),
          {:ok, issues} <- Tracker.fetch_candidate_issues(),
          true <- available_slots(state) > 0 do
