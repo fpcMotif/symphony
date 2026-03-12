@@ -563,6 +563,7 @@ defmodule SymphonyElixir.Orchestrator do
       state
     end
   end
+
   @spec dispatch_candidate(Issue.t(), State.t(), map(), [String.t()], [String.t()]) :: State.t()
 
   def dispatch_candidate(issue, state_acc, refreshed_issues_map, active_states, terminal_states) do
