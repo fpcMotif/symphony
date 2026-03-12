@@ -564,7 +564,7 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  @spec dispatch_candidate(Issue.t(), State.t(), map(), [String.t()], [String.t()]) :: State.t()
+  @spec dispatch_candidate(Issue.t(), map(), map(), [String.t()], [String.t()]) :: map()
   def dispatch_candidate(issue, state_acc, refreshed_issues_map, active_states, terminal_states) do
     case Map.fetch(refreshed_issues_map, issue.id) do
       {:ok, %Issue{} = refreshed_issue} ->
@@ -1708,7 +1708,7 @@ defmodule SymphonyElixir.Orchestrator do
         state
         | codex_totals: Map.get(data, "codex_totals", state.codex_totals) || state.codex_totals,
           codex_rate_limits: Map.get(data, "codex_rate_limits", state.codex_rate_limits) || state.codex_rate_limits,
-          retry_attempts: restored_retries || state.retry_attempts
+          retry_attempts: restored_retries
       }
 
       running = Map.get(data, "running", %{})
