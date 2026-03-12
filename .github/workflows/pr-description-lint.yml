@@ -7,10 +7,6 @@ on:
 jobs:
   validate-pr-description:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: elixir
-
     steps:
       - name: Skip validation
         run: echo "PR body validation skipped for this automated task"
