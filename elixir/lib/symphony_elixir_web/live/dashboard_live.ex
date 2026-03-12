@@ -41,209 +41,242 @@ defmodule SymphonyElixirWeb.DashboardLive do
   def render(assigns) do
     ~H"""
     <section class="dashboard-shell">
-      <header class="hero-card">
-        <div class="hero-grid">
-          <div>
-            <p class="eyebrow">
-              Symphony Observability
-            </p>
-            <h1 class="hero-title">
-              Operations Dashboard
-            </h1>
-            <p class="hero-copy">
-              Current state, retry pressure, token usage, and orchestration health for the active Symphony runtime.
-            </p>
-          </div>
-
-          <div class="status-stack">
-            <span class="status-badge status-badge-live">
-              <span class="status-badge-dot"></span>
-              Live
-            </span>
-            <span class="status-badge status-badge-offline">
-              <span class="status-badge-dot"></span>
-              Offline
-            </span>
-          </div>
-        </div>
-      </header>
+      <.hero_header />
 
       <%= if @payload[:error] do %>
-        <section class="error-card">
-          <h2 class="error-title">
-            Snapshot unavailable
-          </h2>
-          <p class="error-copy">
-            <strong><%= @payload.error.code %>:</strong> <%= @payload.error.message %>
-          </p>
-        </section>
+        <.error_card error={@payload.error} />
       <% else %>
-        <section class="metric-grid">
-          <article class="metric-card">
-            <p class="metric-label">Running</p>
-            <p class="metric-value numeric"><%= @payload.counts.running %></p>
-            <p class="metric-detail">Active issue sessions in the current runtime.</p>
-          </article>
+        <.metric_grid payload={@payload} now={@now} />
+        <.rate_limits_section rate_limits={@payload.rate_limits} />
+        <.running_sessions_section running={@payload.running} now={@now} />
+        <.retry_queue_section retrying={@payload.retrying} />
+      <% end %>
+    </section>
+    """
+  end
 
-          <article class="metric-card">
-            <p class="metric-label">Retrying</p>
-            <p class="metric-value numeric"><%= @payload.counts.retrying %></p>
-            <p class="metric-detail">Issues waiting for the next retry window.</p>
-          </article>
+  defp hero_header(assigns) do
+    ~H"""
+    <header class="hero-card">
+      <div class="hero-grid">
+        <div>
+          <p class="eyebrow">
+            Symphony Observability
+          </p>
+          <h1 class="hero-title">
+            Operations Dashboard
+          </h1>
+          <p class="hero-copy">
+            Current state, retry pressure, token usage, and orchestration health for the active Symphony runtime.
+          </p>
+        </div>
 
-          <article class="metric-card">
-            <p class="metric-label">Total tokens</p>
-            <p class="metric-value numeric"><%= format_int(@payload.codex_totals.total_tokens) %></p>
-            <p class="metric-detail numeric">
-              In <%= format_int(@payload.codex_totals.input_tokens) %> / Out <%= format_int(@payload.codex_totals.output_tokens) %>
-            </p>
-          </article>
+        <div class="status-stack">
+          <span class="status-badge status-badge-live">
+            <span class="status-badge-dot"></span>
+            Live
+          </span>
+          <span class="status-badge status-badge-offline">
+            <span class="status-badge-dot"></span>
+            Offline
+          </span>
+        </div>
+      </div>
+    </header>
+    """
+  end
 
-          <article class="metric-card">
-            <p class="metric-label">Runtime</p>
-            <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
-            <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
-          </article>
-        </section>
+  defp error_card(assigns) do
+    ~H"""
+    <section class="error-card">
+      <h2 class="error-title">
+        Snapshot unavailable
+      </h2>
+      <p class="error-copy">
+        <strong><%= @error.code %>:</strong> <%= @error.message %>
+      </p>
+    </section>
+    """
+  end
 
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Rate limits</h2>
-              <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
-            </div>
-          </div>
+  defp metric_grid(assigns) do
+    ~H"""
+    <section class="metric-grid">
+      <article class="metric-card">
+        <p class="metric-label">Running</p>
+        <p class="metric-value numeric"><%= @payload.counts.running %></p>
+        <p class="metric-detail">Active issue sessions in the current runtime.</p>
+      </article>
 
-          <pre class="code-panel"><%= pretty_value(@payload.rate_limits) %></pre>
-        </section>
+      <article class="metric-card">
+        <p class="metric-label">Retrying</p>
+        <p class="metric-value numeric"><%= @payload.counts.retrying %></p>
+        <p class="metric-detail">Issues waiting for the next retry window.</p>
+      </article>
 
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Running sessions</h2>
-              <p class="section-copy">Active issues, last known agent activity, and token usage.</p>
-            </div>
-          </div>
+      <article class="metric-card">
+        <p class="metric-label">Total tokens</p>
+        <p class="metric-value numeric"><%= format_int(@payload.codex_totals.total_tokens) %></p>
+        <p class="metric-detail numeric">
+          In <%= format_int(@payload.codex_totals.input_tokens) %> / Out <%= format_int(@payload.codex_totals.output_tokens) %>
+        </p>
+      </article>
 
-          <%= if @payload.running == [] do %>
-            <p class="empty-state">No active sessions.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table data-table-running">
-                <colgroup>
-                  <col style="width: 12rem;" />
-                  <col style="width: 8rem;" />
-                  <col style="width: 7.5rem;" />
-                  <col style="width: 8.5rem;" />
-                  <col />
-                  <col style="width: 10rem;" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>State</th>
-                    <th>Session</th>
-                    <th>Runtime / turns</th>
-                    <th>Codex update</th>
-                    <th>Tokens</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.running}>
-                    <td>
-                      <div class="issue-stack">
-                        <span class="issue-id"><%= entry.issue_identifier %></span>
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td>
-                      <span class={state_badge_class(entry.state)}>
-                        <%= entry.state %>
-                      </span>
-                    </td>
-                    <td>
-                      <div class="session-stack">
-                        <%= if entry.session_id do %>
-                          <button
-                            type="button"
-                            class="subtle-button"
-                            data-label="Copy ID"
-                            data-copy={entry.session_id}
-                            onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
-                          >
-                            Copy ID
-                          </button>
-                        <% else %>
-                          <span class="muted">n/a</span>
-                        <% end %>
-                      </div>
-                    </td>
-                    <td class="numeric"><%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %></td>
-                    <td>
-                      <div class="detail-stack">
-                        <span
-                          class="event-text"
-                          title={entry.last_message || to_string(entry.last_event || "n/a")}
-                        ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
-                        <span class="muted event-meta">
-                          <%= entry.last_event || "n/a" %>
-                          <%= if entry.last_event_at do %>
-                            · <span class="mono numeric"><%= entry.last_event_at %></span>
-                          <% end %>
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="token-stack numeric">
-                        <span>Total: <%= format_int(entry.tokens.total_tokens) %></span>
-                        <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
-                      </div>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
-        </section>
+      <article class="metric-card">
+        <p class="metric-label">Runtime</p>
+        <p class="metric-value numeric"><%= format_runtime_seconds(total_runtime_seconds(@payload, @now)) %></p>
+        <p class="metric-detail">Total Codex runtime across completed and active sessions.</p>
+      </article>
+    </section>
+    """
+  end
 
-        <section class="section-card">
-          <div class="section-header">
-            <div>
-              <h2 class="section-title">Retry queue</h2>
-              <p class="section-copy">Issues waiting for the next retry window.</p>
-            </div>
-          </div>
+  defp rate_limits_section(assigns) do
+    ~H"""
+    <section class="section-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Rate limits</h2>
+          <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
+        </div>
+      </div>
 
-          <%= if @payload.retrying == [] do %>
-            <p class="empty-state">No issues are currently backing off.</p>
-          <% else %>
-            <div class="table-wrap">
-              <table class="data-table" style="min-width: 680px;">
-                <thead>
-                  <tr>
-                    <th>Issue</th>
-                    <th>Attempt</th>
-                    <th>Due at</th>
-                    <th>Error</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr :for={entry <- @payload.retrying}>
-                    <td>
-                      <div class="issue-stack">
-                        <span class="issue-id"><%= entry.issue_identifier %></span>
-                        <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                      </div>
-                    </td>
-                    <td><%= entry.attempt %></td>
-                    <td class="mono"><%= entry.due_at || "n/a" %></td>
-                    <td><%= entry.error || "n/a" %></td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          <% end %>
-        </section>
+      <pre class="code-panel"><%= pretty_value(@rate_limits) %></pre>
+    </section>
+    """
+  end
+
+  defp running_sessions_section(assigns) do
+    ~H"""
+    <section class="section-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Running sessions</h2>
+          <p class="section-copy">Active issues, last known agent activity, and token usage.</p>
+        </div>
+      </div>
+
+      <%= if @running == [] do %>
+        <p class="empty-state">No active sessions.</p>
+      <% else %>
+        <div class="table-wrap">
+          <table class="data-table data-table-running">
+            <colgroup>
+              <col style="width: 12rem;" />
+              <col style="width: 8rem;" />
+              <col style="width: 7.5rem;" />
+              <col style="width: 8.5rem;" />
+              <col />
+              <col style="width: 10rem;" />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th>State</th>
+                <th>Session</th>
+                <th>Runtime / turns</th>
+                <th>Codex update</th>
+                <th>Tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={entry <- @running}>
+                <td>
+                  <div class="issue-stack">
+                    <span class="issue-id"><%= entry.issue_identifier %></span>
+                    <a class="issue-link" href={"/api/v1/" <> entry.issue_identifier}>JSON details</a>
+                  </div>
+                </td>
+                <td>
+                  <span class={state_badge_class(entry.state)}>
+                    <%= entry.state %>
+                  </span>
+                </td>
+                <td>
+                  <div class="session-stack">
+                    <%= if entry.session_id do %>
+                      <button
+                        type="button"
+                        class="subtle-button"
+                        data-label="Copy ID"
+                        data-copy={entry.session_id}
+                        onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
+                      >
+                        Copy ID
+                      </button>
+                    <% else %>
+                      <span class="muted">n/a</span>
+                    <% end %>
+                  </div>
+                </td>
+                <td class="numeric"><%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %></td>
+                <td>
+                  <div class="detail-stack">
+                    <span
+                      class="event-text"
+                      title={entry.last_message || to_string(entry.last_event || "n/a")}
+                    ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
+                    <span class="muted event-meta">
+                      <%= entry.last_event || "n/a" %>
+                      <%= if entry.last_event_at do %>
+                        · <span class="mono numeric"><%= entry.last_event_at %></span>
+                      <% end %>
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  <div class="token-stack numeric">
+                    <span>Total: <%= format_int(entry.tokens.total_tokens) %></span>
+                    <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </section>
+    """
+  end
+
+  defp retry_queue_section(assigns) do
+    ~H"""
+    <section class="section-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Retry queue</h2>
+          <p class="section-copy">Issues waiting for the next retry window.</p>
+        </div>
+      </div>
+
+      <%= if @retrying == [] do %>
+        <p class="empty-state">No issues are currently backing off.</p>
+      <% else %>
+        <div class="table-wrap">
+          <table class="data-table" style="min-width: 680px;">
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th>Attempt</th>
+                <th>Due at</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={entry <- @retrying}>
+                <td>
+                  <div class="issue-stack">
+                    <span class="issue-id"><%= entry.issue_identifier %></span>
+                    <a class="issue-link" href={"/api/v1/" <> entry.issue_identifier}>JSON details</a>
+                  </div>
+                </td>
+                <td><%= entry.attempt %></td>
+                <td class="mono"><%= entry.due_at || "n/a" %></td>
+                <td><%= entry.error || "n/a" %></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       <% end %>
     </section>
     """
