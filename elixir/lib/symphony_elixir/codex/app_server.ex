@@ -445,15 +445,19 @@ defmodule SymphonyElixir.Codex.AppServer do
          auto_approve_requests
        )
        when is_binary(method) do
+    state = %{
+      port: port,
+      on_message: on_message,
+      timeout_ms: timeout_ms,
+      tool_executor: tool_executor,
+      auto_approve_requests: auto_approve_requests
+    }
+
     handle_turn_method(
-      port,
-      on_message,
+      method,
       payload,
       payload_string,
-      method,
-      timeout_ms,
-      tool_executor,
-      auto_approve_requests
+      state
     )
   end
 
@@ -517,14 +521,16 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp handle_turn_method(
-         port,
-         on_message,
+         method,
          payload,
          payload_string,
-         method,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
+         %{
+           port: port,
+           on_message: on_message,
+           timeout_ms: timeout_ms,
+           tool_executor: tool_executor,
+           auto_approve_requests: auto_approve_requests
+         } = _state
        ) do
     metadata = metadata_from_message(port, payload)
 
