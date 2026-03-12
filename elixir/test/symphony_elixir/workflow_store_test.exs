@@ -167,20 +167,44 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     Another Polled Prompt
     """)
 
-    # Wait for the next scheduled poll to read the file
-    Process.sleep(1100)
+    # Artificially advance the mtime so the polling mechanism detects the change
+    # Erlang's file stat time resolution is 1 second, so if we write too fast it won't detect it
+    stat = File.stat!(workflow_file, time: :posix)
+    File.touch!(workflow_file, stat.mtime + 2)
 
-    # State should be updated now without a manual current/0 force reload or manual trigger
-    # But current/0 also does a manual reload. So we fetch state directly using sys
-    %{workflow: new_workflow} = :sys.get_state(Process.whereis(WorkflowStore))
-    assert new_workflow.prompt == "Another Polled Prompt"
+    # Wait for the next scheduled poll to read the file
+    wait_for_polling("Another Polled Prompt", 50)
+  end
+
+  defp wait_for_polling(_expected, 0), do: flunk("Polling did not update the state in time")
+
+  defp wait_for_polling(expected, retries) do
+    case Process.whereis(WorkflowStore) do
+      nil ->
+        Process.sleep(100)
+        wait_for_polling(expected, retries - 1)
+
+      pid ->
+        # We fetch state directly using sys to avoid manual force reload triggered by current/0
+        %{workflow: workflow} = :sys.get_state(pid)
+
+        if workflow.prompt == expected do
+          :ok
+        else
+          Process.sleep(100)
+          wait_for_polling(expected, retries - 1)
+        end
+    end
   end
 
   test "start_link/0 starts the process successfully" do
     stop_workflow_store!()
     Process.flag(:trap_exit, true)
 
-    assert {:ok, _pid} = WorkflowStore.start_link()
+    assert {:ok, pid} = WorkflowStore.start_link()
+
+    # Ensure we stop the process so it doesn't leak into other tests
+    GenServer.stop(pid)
   end
 
   test "start_link/1 fails when workflow file is missing" do
