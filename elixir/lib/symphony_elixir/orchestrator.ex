@@ -543,6 +543,23 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
+  defp dispatch_candidate(issue, state_acc, refreshed_issues_map, active_states, terminal_states) do
+    case Map.fetch(refreshed_issues_map, issue.id) do
+      {:ok, %Issue{} = refreshed_issue} ->
+        if retry_candidate_issue?(refreshed_issue, active_states, terminal_states) do
+          do_dispatch_issue(state_acc, refreshed_issue, nil)
+        else
+          Logger.info("Skipping stale dispatch after issue refresh: #{issue_context(refreshed_issue)} state=#{inspect(refreshed_issue.state)} blocked_by=#{length(refreshed_issue.blocked_by)}")
+
+          state_acc
+        end
+
+      :error ->
+        Logger.info("Skipping dispatch; issue missing in refresh: #{issue_context(issue)}")
+        state_acc
+    end
+  end
+
   defp batch_dispatch_issues(candidates, %State{} = state, terminal_states) do
     candidate_ids = Enum.map(candidates, & &1.id)
 
