@@ -60,8 +60,23 @@ defmodule SymphonyElixir.Tracker do
     Application.get_env(:symphony_elixir, :tracker_adapter_module) ||
       case Config.tracker_kind() do
         "memory" -> SymphonyElixir.Tracker.Memory
+        "custom" -> resolve_configured_adapter()
         _ -> SymphonyElixir.Linear.Adapter
       end
+  end
+
+  defp resolve_configured_adapter do
+    case Config.tracker_adapter_module() do
+      nil ->
+        nil
+
+      module_name when is_binary(module_name) ->
+        if String.starts_with?(module_name, "Elixir.") do
+          String.to_atom(module_name)
+        else
+          String.to_atom("Elixir.#{module_name}")
+        end
+    end
   end
 
   defp normalize_list_response({:ok, values}, _operation) when is_list(values), do: {:ok, values}

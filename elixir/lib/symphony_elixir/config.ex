@@ -53,6 +53,7 @@ defmodule SymphonyElixir.Config do
                                  kind: [type: {:or, [:string, nil]}, default: nil],
                                  endpoint: [type: :string, default: @default_linear_endpoint],
                                  api_key: [type: {:or, [:string, nil]}, default: nil],
+                                 adapter_module: [type: {:or, [:string, nil]}, default: nil],
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
                                  active_states: [
@@ -186,6 +187,11 @@ defmodule SymphonyElixir.Config do
   @spec tracker_kind() :: tracker_kind()
   def tracker_kind do
     get_in(validated_workflow_options(), [:tracker, :kind])
+  end
+
+  @spec tracker_adapter_module() :: String.t() | nil
+  def tracker_adapter_module do
+    get_in(validated_workflow_options(), [:tracker, :adapter_module])
   end
 
   @spec linear_endpoint() :: String.t()
@@ -400,6 +406,12 @@ defmodule SymphonyElixir.Config do
     case tracker_kind() do
       "linear" -> :ok
       "memory" -> :ok
+      "custom" ->
+        if is_binary(tracker_adapter_module()) and String.trim(tracker_adapter_module()) != "" do
+          :ok
+        else
+          {:error, :missing_tracker_adapter_module}
+        end
       nil -> {:error, :missing_tracker_kind}
       other -> {:error, {:unsupported_tracker_kind, other}}
     end
@@ -470,6 +482,7 @@ defmodule SymphonyElixir.Config do
   defp extract_tracker_options(section) do
     %{}
     |> put_if_present(:kind, normalize_tracker_kind(scalar_string_value(Map.get(section, "kind"))))
+    |> put_if_present(:adapter_module, scalar_string_value(Map.get(section, "adapter_module")))
     |> put_if_present(:endpoint, scalar_string_value(Map.get(section, "endpoint")))
     |> put_if_present(:api_key, binary_value(Map.get(section, "api_key"), allow_empty: true))
     |> put_if_present(:project_slug, scalar_string_value(Map.get(section, "project_slug")))

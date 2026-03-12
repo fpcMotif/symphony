@@ -47,6 +47,16 @@ defmodule SymphonyElixir.TrackerContractLinearClientStub do
   end
 end
 
+defmodule SymphonyElixir.TrackerContractCustomStub do
+  @moduledoc false
+
+  def fetch_candidate_issues, do: {:ok, [%{id: "custom-1"}]}
+  def fetch_issues_by_states(_states), do: {:ok, []}
+  def fetch_issue_states_by_ids(_ids), do: {:ok, []}
+  def create_comment(_issue_id, _body), do: :ok
+  def update_issue_state(_issue_id, _state_name), do: :ok
+end
+
 defmodule SymphonyElixir.TrackerContractInvalidAdapterStub do
   @moduledoc false
 
@@ -108,6 +118,14 @@ defmodule SymphonyElixir.TrackerContractTest do
 
       assert {:error, :invalid_states} = Tracker.fetch_issues_by_states("Todo")
       assert {:error, :invalid_issue_ids} = Tracker.fetch_issue_states_by_ids(%{id: "I-1"})
+    end
+  end
+
+  describe "custom adapter contract" do
+    test "returns custom adapter implementation" do
+      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: "SymphonyElixir.TrackerContractCustomStub")
+
+      assert {:ok, [%{id: "custom-1"}]} = Tracker.fetch_candidate_issues()
     end
   end
 

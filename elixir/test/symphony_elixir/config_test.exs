@@ -53,4 +53,12 @@ defmodule SymphonyElixir.ConfigTest do
 
     assert {:error, {:unsupported_tracker_kind, "jira"}} = Config.validate!()
   end
+
+  test "validate! supports custom tracker kind when adapter module is present" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: "MyApp.Tracker")
+    assert :ok = Config.validate!()
+
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: "")
+    assert {:error, :missing_tracker_adapter_module} = Config.validate!()
+  end
 end
