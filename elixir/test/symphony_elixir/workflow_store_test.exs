@@ -204,6 +204,7 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     {:ok, workflow_after} = WorkflowStore.current()
     assert workflow_after.prompt == "Initial Prompt"
   end
+
   test "start_link/0 starts the GenServer with default arguments" do
     stop_workflow_store!()
 
