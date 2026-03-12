@@ -57,10 +57,12 @@ defmodule SymphonyElixir.Tracker do
 
   @spec adapter() :: module()
   def adapter do
+    settings = Config.settings!()
+
     Application.get_env(:symphony_elixir, :tracker_adapter_module) ||
-      case Config.tracker_kind() do
+      case settings.tracker.kind do
         "memory" -> SymphonyElixir.Tracker.Memory
-        "custom" -> String.to_atom("Elixir." <> Config.tracker_adapter_module())
+        "custom" -> String.to_atom("Elixir." <> settings.tracker.adapter_module)
         _ -> SymphonyElixir.Linear.Adapter
       end
   end

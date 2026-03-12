@@ -39,6 +39,8 @@ defmodule SymphonyElixirWeb.PresenterTest do
                  issue_id: "issue-running",
                  issue_identifier: "MT-123",
                  state: "In Progress",
+                 worker_host: nil,
+                 workspace_path: nil,
                  session_id: "thread-running",
                  turn_count: 3,
                  last_event: :session_started,
@@ -54,7 +56,9 @@ defmodule SymphonyElixirWeb.PresenterTest do
                  issue_identifier: "MT-999",
                  attempt: 2,
                  due_at: payload.retrying |> hd() |> Map.fetch!(:due_at),
-                 error: "retry failed"
+                 error: "retry failed",
+                 worker_host: nil,
+                 workspace_path: nil
                }
              ],
              codex_totals: %{input_tokens: 11, output_tokens: 22, total_tokens: 33, seconds_running: 45.5},
@@ -105,9 +109,11 @@ defmodule SymphonyElixirWeb.PresenterTest do
              issue_identifier: "MT-123",
              issue_id: "issue-running",
              status: "running",
-             workspace: %{path: Path.join(Config.workspace_root(), "MT-123")},
+             workspace: %{path: Path.join(Config.settings!().workspace.root, "MT-123"), host: nil},
              attempts: %{restart_count: 0, current_retry_attempt: 0},
              running: %{
+               worker_host: nil,
+               workspace_path: nil,
                session_id: "thread-running",
                turn_count: 3,
                state: "In Progress",
@@ -141,13 +147,15 @@ defmodule SymphonyElixirWeb.PresenterTest do
              issue_identifier: "MT-999",
              issue_id: "issue-retry",
              status: "retrying",
-             workspace: %{path: Path.join(Config.workspace_root(), "MT-999")},
+             workspace: %{path: Path.join(Config.settings!().workspace.root, "MT-999"), host: nil},
              attempts: %{restart_count: 1, current_retry_attempt: 2},
              running: nil,
              retry: %{
                attempt: 2,
                due_at: payload.retry.due_at,
-               error: "retry failed"
+               error: "retry failed",
+               worker_host: nil,
+               workspace_path: nil
              },
              logs: %{codex_session_logs: []},
              recent_events: [],

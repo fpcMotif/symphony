@@ -4,7 +4,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   """
 
   require Logger
-  alias SymphonyElixir.{Codex.DynamicTool, Config}
+  alias SymphonyElixir.{Codex.DynamicTool, Config, PathSafety, SSH}
 
   @initialize_id 1
   @thread_start_id 2
@@ -23,12 +23,13 @@ defmodule SymphonyElixir.Codex.AppServer do
           thread_sandbox: String.t(),
           turn_sandbox_policy: map(),
           thread_id: String.t(),
-          workspace: Path.t()
+          workspace: Path.t(),
+          worker_host: String.t() | nil
         }
 
   @spec run(Path.t(), String.t(), map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(workspace, prompt, issue, opts \\ []) do
-    with {:ok, session} <- start_session(workspace) do
+    with {:ok, session} <- start_session(workspace, opts) do
       try do
         run_turn(session, prompt, issue, opts)
       after
@@ -37,14 +38,15 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  @spec start_session(Path.t()) :: {:ok, session()} | {:error, term()}
-  def start_session(workspace) do
-    with :ok <- validate_workspace_cwd(workspace),
-         {:ok, port} <- start_port(workspace) do
-      metadata = port_metadata(port)
-      expanded_workspace = Path.expand(workspace)
+  @spec start_session(Path.t(), keyword()) :: {:ok, session()} | {:error, term()}
+  def start_session(workspace, opts \\ []) do
+    worker_host = Keyword.get(opts, :worker_host)
 
-      with {:ok, session_policies} <- session_policies(expanded_workspace),
+    with {:ok, expanded_workspace} <- validate_workspace_cwd(workspace, worker_host),
+         {:ok, port} <- start_port(expanded_workspace, worker_host) do
+      metadata = port_metadata(port, worker_host)
+
+      with {:ok, session_policies} <- session_policies(expanded_workspace, worker_host),
            {:ok, thread_id} <- do_start_session(port, expanded_workspace, session_policies) do
         {:ok,
          %{
@@ -55,7 +57,8 @@ defmodule SymphonyElixir.Codex.AppServer do
            thread_sandbox: session_policies.thread_sandbox,
            turn_sandbox_policy: session_policies.turn_sandbox_policy,
            thread_id: thread_id,
-           workspace: expanded_workspace
+           workspace: expanded_workspace,
+           worker_host: worker_host
          }}
       else
         {:error, reason} ->
@@ -197,25 +200,49 @@ defmodule SymphonyElixir.Codex.AppServer do
     {:error, reason}
   end
 
-  defp validate_workspace_cwd(workspace) when is_binary(workspace) do
-    workspace_path = Path.expand(workspace)
-    workspace_root = Path.expand(Config.workspace_root())
+  defp validate_workspace_cwd(workspace, nil) when is_binary(workspace) do
+    expanded_workspace = Path.expand(workspace)
+    expanded_root = Path.expand(Config.settings!().workspace.root)
+    expanded_root_prefix = expanded_root <> "/"
 
-    root_prefix = workspace_root <> "/"
+    with {:ok, canonical_workspace} <- PathSafety.canonicalize(expanded_workspace),
+         {:ok, canonical_root} <- PathSafety.canonicalize(expanded_root) do
+      canonical_root_prefix = canonical_root <> "/"
 
-    cond do
-      workspace_path == workspace_root ->
-        {:error, {:invalid_workspace_cwd, :workspace_root, workspace_path}}
+      cond do
+        canonical_workspace == canonical_root ->
+          {:error, {:invalid_workspace_cwd, :workspace_root, canonical_workspace}}
 
-      not String.starts_with?(workspace_path <> "/", root_prefix) ->
-        {:error, {:invalid_workspace_cwd, :outside_workspace_root, workspace_path, workspace_root}}
+        String.starts_with?(canonical_workspace <> "/", canonical_root_prefix) ->
+          {:ok, canonical_workspace}
 
-      true ->
-        :ok
+        String.starts_with?(expanded_workspace <> "/", expanded_root_prefix) ->
+          {:error, {:invalid_workspace_cwd, :symlink_escape, expanded_workspace, canonical_root}}
+
+        true ->
+          {:error, {:invalid_workspace_cwd, :outside_workspace_root, canonical_workspace, canonical_root}}
+      end
+    else
+      {:error, {:path_canonicalize_failed, path, reason}} ->
+        {:error, {:invalid_workspace_cwd, :path_unreadable, path, reason}}
     end
   end
 
-  defp start_port(workspace) do
+  defp validate_workspace_cwd(workspace, worker_host)
+       when is_binary(workspace) and is_binary(worker_host) do
+    cond do
+      String.trim(workspace) == "" ->
+        {:error, {:invalid_workspace_cwd, :empty_remote_workspace, worker_host}}
+
+      String.contains?(workspace, ["\n", "\r", <<0>>]) ->
+        {:error, {:invalid_workspace_cwd, :invalid_remote_workspace, worker_host, workspace}}
+
+      true ->
+        {:ok, workspace}
+    end
+  end
+
+  defp start_port(workspace, nil) do
     executable = System.find_executable("bash")
 
     if is_nil(executable) do
@@ -227,7 +254,8 @@ defmodule SymphonyElixir.Codex.AppServer do
           [
             :binary,
             :exit_status,
-            args: [~c"-lc", String.to_charlist(wrap_codex_command(Config.codex_command()))],
+            :stderr_to_stdout,
+            args: [~c"-lc", String.to_charlist(Config.settings!().codex.command)],
             cd: String.to_charlist(workspace),
             line: @port_line_bytes
           ]
@@ -237,17 +265,32 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp wrap_codex_command(command) when is_binary(command) do
-    "{ #{command}; } 2> >(while IFS= read -r line; do printf '%s%s\\n' '#{@stderr_stream_prefix}' \"$line\"; done)"
+  defp start_port(workspace, worker_host) when is_binary(worker_host) do
+    remote_command = remote_launch_command(workspace)
+    SSH.start_port(worker_host, remote_command, line: @port_line_bytes)
   end
 
-  defp port_metadata(port) when is_port(port) do
-    case :erlang.port_info(port, :os_pid) do
-      {:os_pid, os_pid} ->
-        %{codex_app_server_pid: to_string(os_pid)}
+  defp remote_launch_command(workspace) when is_binary(workspace) do
+    [
+      "cd #{shell_escape(workspace)}",
+      "exec #{Config.settings!().codex.command}"
+    ]
+    |> Enum.join(" && ")
+  end
 
-      _ ->
-        %{}
+  defp port_metadata(port, worker_host) when is_port(port) do
+    base_metadata =
+      case :erlang.port_info(port, :os_pid) do
+        {:os_pid, os_pid} ->
+          %{codex_app_server_pid: to_string(os_pid)}
+
+        _ ->
+          %{}
+      end
+
+    case worker_host do
+      host when is_binary(host) -> Map.put(base_metadata, :worker_host, host)
+      _ -> base_metadata
     end
   end
 
@@ -275,8 +318,12 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp session_policies(workspace) do
+  defp session_policies(workspace, nil) do
     Config.codex_runtime_settings(workspace)
+  end
+
+  defp session_policies(workspace, worker_host) when is_binary(worker_host) do
+    Config.codex_runtime_settings(workspace, remote: true)
   end
 
   defp do_start_session(port, workspace, session_policies) do
@@ -293,7 +340,7 @@ defmodule SymphonyElixir.Codex.AppServer do
       "params" => %{
         "approvalPolicy" => approval_policy,
         "sandbox" => thread_sandbox,
-        "cwd" => Path.expand(workspace),
+        "cwd" => workspace,
         "dynamicTools" => DynamicTool.tool_specs()
       }
     })
@@ -322,7 +369,7 @@ defmodule SymphonyElixir.Codex.AppServer do
             "text" => prompt
           }
         ],
-        "cwd" => Path.expand(workspace),
+        "cwd" => workspace,
         "title" => "#{issue.identifier}: #{issue.title}",
         "approvalPolicy" => approval_policy,
         "sandboxPolicy" => turn_sandbox_policy
@@ -336,7 +383,14 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
-    receive_loop(port, on_message, Config.codex_turn_timeout_ms(), "", tool_executor, auto_approve_requests)
+    receive_loop(
+      port,
+      on_message,
+      Config.settings!().codex.turn_timeout_ms,
+      "",
+      tool_executor,
+      auto_approve_requests
+    )
   end
 
   defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
@@ -622,7 +676,10 @@ defmodule SymphonyElixir.Codex.AppServer do
     tool_name = tool_call_name(params)
     arguments = tool_call_arguments(params)
 
-    result = tool_executor.(tool_name, arguments)
+    result =
+      tool_name
+      |> tool_executor.(arguments)
+      |> normalize_dynamic_tool_result()
 
     send_message(port, %{
       "id" => id,
@@ -715,26 +772,18 @@ defmodule SymphonyElixir.Codex.AppServer do
          on_message,
          metadata,
          _tool_executor,
-         _auto_approve_requests
+         auto_approve_requests
        ) do
-    case classify_tool_request_user_input(params) do
-      :option_prompt ->
-        reply_with_non_interactive_tool_input_answer(
-          port,
-          id,
-          params,
-          payload,
-          payload_string,
-          on_message,
-          metadata
-        )
-
-      :approval_prompt ->
-        :input_required
-
-      :freeform_prompt ->
-        :input_required
-    end
+    maybe_auto_answer_tool_request_user_input(
+      port,
+      id,
+      params,
+      payload,
+      payload_string,
+      on_message,
+      metadata,
+      auto_approve_requests
+    )
   end
 
   defp maybe_handle_approval_request(
@@ -748,6 +797,44 @@ defmodule SymphonyElixir.Codex.AppServer do
          _auto_approve_requests
        ) do
     :unhandled
+  end
+
+  defp normalize_dynamic_tool_result(%{"success" => success} = result) when is_boolean(success) do
+    output =
+      case Map.get(result, "output") do
+        existing_output when is_binary(existing_output) -> existing_output
+        _ -> dynamic_tool_output(result)
+      end
+
+    content_items =
+      case Map.get(result, "contentItems") do
+        existing_items when is_list(existing_items) -> existing_items
+        _ -> dynamic_tool_content_items(output)
+      end
+
+    result
+    |> Map.put("output", output)
+    |> Map.put("contentItems", content_items)
+  end
+
+  defp normalize_dynamic_tool_result(result) do
+    %{
+      "success" => false,
+      "output" => inspect(result),
+      "contentItems" => dynamic_tool_content_items(inspect(result))
+    }
+  end
+
+  defp dynamic_tool_output(%{"contentItems" => [%{"text" => text} | _]}) when is_binary(text), do: text
+  defp dynamic_tool_output(result), do: Jason.encode!(result, pretty: true)
+
+  defp dynamic_tool_content_items(output) when is_binary(output) do
+    [
+      %{
+        "type" => "inputText",
+        "text" => output
+      }
+    ]
   end
 
   defp approve_or_require(
@@ -784,6 +871,101 @@ defmodule SymphonyElixir.Codex.AppServer do
        ) do
     :approval_required
   end
+
+  defp maybe_auto_answer_tool_request_user_input(
+         port,
+         id,
+         params,
+         payload,
+         payload_string,
+         on_message,
+         metadata,
+         true
+       ) do
+    case tool_request_user_input_approval_answers(params) do
+      {:ok, answers, decision} ->
+        send_message(port, %{"id" => id, "result" => %{"answers" => answers}})
+
+        emit_message(
+          on_message,
+          :approval_auto_approved,
+          %{payload: payload, raw: payload_string, decision: decision},
+          metadata
+        )
+
+        :approved
+
+      :error ->
+        reply_with_non_interactive_tool_input_answer(
+          port,
+          id,
+          params,
+          payload,
+          payload_string,
+          on_message,
+          metadata
+        )
+    end
+  end
+
+  defp maybe_auto_answer_tool_request_user_input(
+         port,
+         id,
+         params,
+         payload,
+         payload_string,
+         on_message,
+         metadata,
+         false
+       ) do
+    reply_with_non_interactive_tool_input_answer(
+      port,
+      id,
+      params,
+      payload,
+      payload_string,
+      on_message,
+      metadata
+    )
+  end
+
+  defp tool_request_user_input_approval_answers(%{"questions" => questions}) when is_list(questions) do
+    answers =
+      Enum.reduce_while(questions, %{}, fn question, acc ->
+        case tool_request_user_input_approval_answer(question) do
+          {:ok, question_id, answer_label} ->
+            {:cont, Map.put(acc, question_id, %{"answers" => [answer_label]})}
+
+          :error ->
+            {:halt, :error}
+        end
+      end)
+
+    case answers do
+      :error -> :error
+      answer_map when map_size(answer_map) > 0 -> {:ok, answer_map, "Approve this Session"}
+      _ -> :error
+    end
+  end
+
+  defp tool_request_user_input_approval_answers(_params), do: :error
+
+  defp tool_request_user_input_approval_answer(%{"id" => question_id, "options" => options})
+       when is_binary(question_id) and is_list(options) do
+    session_option =
+      Enum.find(options, fn option ->
+        label = Map.get(option, "label", "")
+        normalized = label |> String.trim() |> String.downcase()
+        normalized == "approve this session"
+      end)
+
+    case session_option do
+      %{"label" => label} -> {:ok, question_id, label}
+      _ -> :error
+    end
+  end
+
+  defp tool_request_user_input_approval_answer(_question), do: :error
 
   defp reply_with_non_interactive_tool_input_answer(
          port,
@@ -890,7 +1072,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   defp approval_option?(_option), do: false
 
   defp await_response(port, request_id) do
-    timeout_ms = Config.codex_read_timeout_ms()
+    timeout_ms = Config.settings!().codex.read_timeout_ms
 
     case take_matching_buffered_response(port, request_id) do
       {:ok, buffered_line} ->
@@ -1099,7 +1281,7 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp metadata_from_message(port, payload) do
-    port |> port_metadata() |> maybe_set_usage(payload)
+    port |> port_metadata(nil) |> maybe_set_usage(payload)
   end
 
   defp maybe_set_usage(metadata, payload) when is_map(payload) do
@@ -1113,6 +1295,10 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_set_usage(metadata, _payload), do: metadata
+
+  defp shell_escape(value) when is_binary(value) do
+    "'" <> String.replace(value, "'", "'\"'\"'") <> "'"
+  end
 
   defp default_on_message(_message), do: :ok
 

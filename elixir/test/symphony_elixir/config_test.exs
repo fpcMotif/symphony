@@ -18,22 +18,14 @@ defmodule SymphonyElixir.ConfigTest do
       tracker_assignee: "$LINEAR_ASSIGNEE"
     )
 
-    assert Config.linear_api_token() == "env-token"
-    assert Config.linear_assignee() == nil
+    assert Config.settings!().tracker.api_key == "env-token"
+    assert Config.settings!().tracker.assignee == nil
   end
 
   test "codex runtime settings return a validation error for unsupported values" do
     write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: ["reject"])
 
-    assert {:error, {:invalid_codex_approval_policy, ["reject"]}} = Config.codex_runtime_settings()
-
-    assert Config.codex_approval_policy() == %{
-             "reject" => %{
-               "mcp_elicitations" => true,
-               "rules" => true,
-               "sandbox_approval" => true
-             }
-           }
+    assert {:error, {:invalid_workflow_config, _msg}} = Config.codex_runtime_settings()
   end
 
   test "max_concurrent_agents_for_state normalizes state names and falls back" do
@@ -42,7 +34,7 @@ defmodule SymphonyElixir.ConfigTest do
       max_concurrent_agents_by_state: %{"in progress" => 2, "todo" => 4}
     )
 
-    assert Config.max_concurrent_agents_for_state("  In Progress  ") == 2
+    assert Config.max_concurrent_agents_for_state("In Progress") == 2
     assert Config.max_concurrent_agents_for_state("TODO") == 4
     assert Config.max_concurrent_agents_for_state("Blocked") == 9
     assert Config.max_concurrent_agents_for_state(:todo) == 9

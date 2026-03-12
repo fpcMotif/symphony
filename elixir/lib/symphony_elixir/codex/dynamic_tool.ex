@@ -159,24 +159,21 @@ defmodule SymphonyElixir.Codex.DynamicTool do
         _ -> true
       end
 
-    %{
-      "success" => success,
-      "contentItems" => [
-        %{
-          "type" => "inputText",
-          "text" => encode_payload(response)
-        }
-      ]
-    }
+    dynamic_tool_response(success, encode_payload(response))
   end
 
   defp failure_response(payload) do
+    dynamic_tool_response(false, encode_payload(payload))
+  end
+
+  defp dynamic_tool_response(success, output) when is_boolean(success) and is_binary(output) do
     %{
-      "success" => false,
+      "success" => success,
+      "output" => output,
       "contentItems" => [
         %{
           "type" => "inputText",
-          "text" => encode_payload(payload)
+          "text" => output
         }
       ]
     }
@@ -267,19 +264,20 @@ defmodule SymphonyElixir.Codex.DynamicTool do
   defp linear_graphql_disabled?(opts) when is_list(opts) do
     case Keyword.fetch(opts, :linear_graphql_enabled) do
       {:ok, value} -> value == false
-      :error -> not Config.codex_linear_graphql_enabled?()
+      :error -> not Config.settings!().codex.linear_graphql_enabled
     end
   end
 
   defp linear_graphql_advertised?(opts) when is_list(opts) do
     case Keyword.fetch(opts, :linear_graphql_enabled) do
       {:ok, value} -> value == true and linear_graphql_configured?()
-      :error -> Config.codex_linear_graphql_enabled?() and linear_graphql_configured?()
+      :error -> Config.settings!().codex.linear_graphql_enabled and linear_graphql_configured?()
     end
   end
 
   defp linear_graphql_configured? do
-    Config.tracker_kind() == "linear" and is_binary(Config.linear_api_token())
+    settings = Config.settings!()
+    settings.tracker.kind == "linear" and is_binary(settings.tracker.api_key)
   end
 
   defp supported_tool_names(opts) do

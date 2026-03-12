@@ -39,123 +39,93 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
-  test "app server maps startup read timeout to response_timeout" do
+  test "app server rejects symlink escape cwd paths under the workspace root" do
     test_root =
       Path.join(
         System.tmp_dir!(),
-        "symphony-elixir-app-server-response-timeout-#{System.unique_integer([:positive])}"
+        "symphony-elixir-app-server-symlink-cwd-guard-#{System.unique_integer([:positive])}"
       )
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
-      workspace = Path.join(workspace_root, "MT-TIMEOUT")
-      codex_binary = Path.join(test_root, "fake-codex")
-      File.mkdir_p!(workspace)
+      outside_workspace = Path.join(test_root, "outside")
+      symlink_workspace = Path.join(workspace_root, "MT-1000")
 
-      File.write!(codex_binary, """
-      #!/bin/sh
-      while IFS= read -r _line; do
-        sleep 1
-      done
-      """)
-
-      File.chmod!(codex_binary, 0o755)
+      File.mkdir_p!(workspace_root)
+      File.mkdir_p!(outside_workspace)
+      File.ln_s!(outside_workspace, symlink_workspace)
 
       write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_read_timeout_ms: 10
+        workspace_root: workspace_root
       )
 
       issue = %Issue{
-        id: "issue-response-timeout",
-        identifier: "MT-TIMEOUT",
-        title: "Response timeout",
-        description: "Startup request should time out cleanly",
+        id: "issue-workspace-symlink-guard",
+        identifier: "MT-1000",
+        title: "Validate symlink workspace guard",
+        description: "Ensure app-server refuses symlink escape cwd targets",
         state: "In Progress",
-        url: "https://example.org/issues/MT-TIMEOUT",
+        url: "https://example.org/issues/MT-1000",
         labels: ["backend"]
       }
 
-      assert {:error, :response_timeout} = AppServer.run(workspace, "Timeout", issue)
+      assert {:error, {:invalid_workspace_cwd, :symlink_escape, ^symlink_workspace, _root}} =
+               AppServer.run(symlink_workspace, "guard", issue)
     after
       File.rm_rf(test_root)
     end
   end
 
-  test "app server maps early subprocess exit to port_exit" do
+  test "app server passes explicit turn sandbox policies through unchanged" do
     test_root =
       Path.join(
         System.tmp_dir!(),
-        "symphony-elixir-app-server-port-exit-#{System.unique_integer([:positive])}"
+        "symphony-elixir-app-server-supported-turn-policies-#{System.unique_integer([:positive])}"
       )
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
-      workspace = Path.join(workspace_root, "MT-EXIT")
+      workspace = Path.join(workspace_root, "MT-1001")
       codex_binary = Path.join(test_root, "fake-codex")
+      trace_file = Path.join(test_root, "codex-supported-turn-policies.trace")
+      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
+
+      on_exit(fn ->
+        if is_binary(previous_trace) do
+          System.put_env("SYMP_TEST_CODEx_TRACE", previous_trace)
+        else
+          System.delete_env("SYMP_TEST_CODEx_TRACE")
+        end
+      end)
+
+      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
       File.mkdir_p!(workspace)
 
       File.write!(codex_binary, """
       #!/bin/sh
-      exit 17
-      """)
-
-      File.chmod!(codex_binary, 0o755)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server"
-      )
-
-      issue = %Issue{
-        id: "issue-port-exit",
-        identifier: "MT-EXIT",
-        title: "Port exit",
-        description: "Startup should surface process exit",
-        state: "In Progress",
-        url: "https://example.org/issues/MT-EXIT",
-        labels: ["backend"]
-      }
-
-      assert {:error, {:port_exit, 17}} = AppServer.run(workspace, "Exit", issue)
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "app server maps hung turn streams to turn_timeout" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-app-server-turn-timeout-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      workspace_root = Path.join(test_root, "workspaces")
-      workspace = Path.join(workspace_root, "MT-TURN-TIMEOUT")
-      codex_binary = Path.join(test_root, "fake-codex")
-      File.mkdir_p!(workspace)
-
-      File.write!(codex_binary, """
-      #!/bin/sh
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-supported-turn-policies.trace}"
       count=0
-      while IFS= read -r _line; do
+
+      while IFS= read -r line; do
         count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "$trace_file"
 
         case "$count" in
           1)
             printf '%s\\n' '{"id":1,"result":{}}'
             ;;
           2)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-timeout"}}}'
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-1001"}}}'
             ;;
           3)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-timeout"}}}'
-            sleep 1
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-1001"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
             ;;
           *)
-            sleep 1
+            exit 0
             ;;
         esac
       done
@@ -163,23 +133,51 @@ defmodule SymphonyElixir.AppServerTest do
 
       File.chmod!(codex_binary, 0o755)
 
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        codex_command: "#{codex_binary} app-server",
-        codex_turn_timeout_ms: 10
-      )
-
       issue = %Issue{
-        id: "issue-turn-timeout",
-        identifier: "MT-TURN-TIMEOUT",
-        title: "Turn timeout",
-        description: "Turn stream should time out cleanly",
+        id: "issue-supported-turn-policies",
+        identifier: "MT-1001",
+        title: "Validate explicit turn sandbox policy passthrough",
+        description: "Ensure runtime startup forwards configured turn sandbox policies unchanged",
         state: "In Progress",
-        url: "https://example.org/issues/MT-TURN-TIMEOUT",
+        url: "https://example.org/issues/MT-1001",
         labels: ["backend"]
       }
 
-      assert {:error, :turn_timeout} = AppServer.run(workspace, "Turn timeout", issue)
+      policy_cases = [
+        %{"type" => "dangerFullAccess"},
+        %{"type" => "externalSandbox", "profile" => "remote-ci"},
+        %{"type" => "workspaceWrite", "writableRoots" => ["relative/path"], "networkAccess" => true},
+        %{"type" => "futureSandbox", "nested" => %{"flag" => true}}
+      ]
+
+      Enum.each(policy_cases, fn configured_policy ->
+        File.rm(trace_file)
+
+        write_workflow_file!(Workflow.workflow_file_path(),
+          workspace_root: workspace_root,
+          codex_command: "#{codex_binary} app-server",
+          codex_turn_sandbox_policy: configured_policy
+        )
+
+        assert {:ok, _result} = AppServer.run(workspace, "Validate supported turn policy", issue)
+
+        trace = File.read!(trace_file)
+        lines = String.split(trace, "\n", trim: true)
+
+        assert Enum.any?(lines, fn line ->
+                 if String.starts_with?(line, "JSON:") do
+                   line
+                   |> String.trim_leading("JSON:")
+                   |> Jason.decode!()
+                   |> then(fn payload ->
+                     payload["method"] == "turn/start" &&
+                       get_in(payload, ["params", "sandboxPolicy"]) == configured_policy
+                   end)
+                 else
+                   false
+                 end
+               end)
+      end)
     after
       File.rm_rf(test_root)
     end
@@ -464,207 +462,18 @@ defmodule SymphonyElixir.AppServerTest do
     end
   end
 
-  test "app server omits dynamic tools when Linear auth is unavailable" do
+  test "app server auto-approves MCP tool approval prompts when approval policy is never" do
     test_root =
       Path.join(
         System.tmp_dir!(),
-        "symphony-elixir-app-server-no-dynamic-tools-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      workspace_root = Path.join(test_root, "workspaces")
-      workspace = Path.join(workspace_root, "MT-NO-TOOLS")
-      codex_binary = Path.join(test_root, "fake-codex")
-      trace_file = Path.join(test_root, "codex-no-dynamic-tools.trace")
-      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
-
-      on_exit(fn ->
-        if is_binary(previous_trace) do
-          System.put_env("SYMP_TEST_CODEx_TRACE", previous_trace)
-        else
-          System.delete_env("SYMP_TEST_CODEx_TRACE")
-        end
-      end)
-
-      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
-      File.mkdir_p!(workspace)
-
-      File.write!(codex_binary, """
-      #!/bin/sh
-      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-no-dynamic-tools.trace}"
-      count=0
-      while IFS= read -r line; do
-        count=$((count + 1))
-        printf 'JSON:%s\\n' "$line" >> "$trace_file"
-
-        case "$count" in
-          1)
-            printf '%s\\n' '{"id":1,"result":{}}'
-            ;;
-          2)
-            ;;
-          3)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-no-tools"}}}'
-            ;;
-          4)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-no-tools"}}}'
-            printf '%s\\n' '{"method":"turn/completed"}'
-            exit 0
-            ;;
-          *)
-            exit 0
-            ;;
-        esac
-      done
-      """)
-
-      File.chmod!(codex_binary, 0o755)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        tracker_api_token: nil,
-        codex_command: "#{codex_binary} app-server"
-      )
-
-      issue = %Issue{
-        id: "issue-no-dynamic-tools",
-        identifier: "MT-NO-TOOLS",
-        title: "No dynamic tools",
-        description: "Ensure linear_graphql is hidden without auth",
-        state: "In Progress",
-        url: "https://example.org/issues/MT-NO-TOOLS",
-        labels: ["backend"]
-      }
-
-      assert {:ok, _result} = AppServer.run(workspace, "No dynamic tools", issue)
-
-      trace = File.read!(trace_file)
-      lines = String.split(trace, "\n", trim: true)
-
-      assert Enum.any?(lines, fn line ->
-               if String.starts_with?(line, "JSON:") do
-                 payload =
-                   line
-                   |> String.trim_leading("JSON:")
-                   |> Jason.decode!()
-
-                 payload["id"] == 2 and get_in(payload, ["params", "dynamicTools"]) == []
-               else
-                 false
-               end
-             end)
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "app server omits dynamic tools when workflow config disables linear_graphql" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-app-server-linear-graphql-disabled-#{System.unique_integer([:positive])}"
-      )
-
-    try do
-      workspace_root = Path.join(test_root, "workspaces")
-      workspace = Path.join(workspace_root, "MT-DISABLED")
-      codex_binary = Path.join(test_root, "fake-codex")
-      trace_file = Path.join(test_root, "codex-linear-graphql-disabled.trace")
-      previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
-
-      on_exit(fn ->
-        if is_binary(previous_trace) do
-          System.put_env("SYMP_TEST_CODEx_TRACE", previous_trace)
-        else
-          System.delete_env("SYMP_TEST_CODEx_TRACE")
-        end
-      end)
-
-      System.put_env("SYMP_TEST_CODEx_TRACE", trace_file)
-      File.mkdir_p!(workspace)
-
-      File.write!(codex_binary, """
-      #!/bin/sh
-      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-linear-graphql-disabled.trace}"
-      count=0
-      while IFS= read -r line; do
-        count=$((count + 1))
-        printf 'JSON:%s\\n' "$line" >> "$trace_file"
-
-        case "$count" in
-          1)
-            printf '%s\\n' '{"id":1,"result":{}}'
-            ;;
-          2)
-            ;;
-          3)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-disabled"}}}'
-            ;;
-          4)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-disabled"}}}'
-            printf '%s\\n' '{"method":"turn/completed"}'
-            exit 0
-            ;;
-          *)
-            exit 0
-            ;;
-        esac
-      done
-      """)
-
-      File.chmod!(codex_binary, 0o755)
-
-      write_workflow_file!(Workflow.workflow_file_path(),
-        workspace_root: workspace_root,
-        tracker_api_token: "token",
-        codex_linear_graphql_enabled: false,
-        codex_command: "#{codex_binary} app-server"
-      )
-
-      issue = %Issue{
-        id: "issue-linear-graphql-disabled",
-        identifier: "MT-DISABLED",
-        title: "Disabled dynamic tool",
-        description: "Ensure linear_graphql can be disabled by workflow config",
-        state: "In Progress",
-        url: "https://example.org/issues/MT-DISABLED",
-        labels: ["backend"]
-      }
-
-      assert {:ok, _result} = AppServer.run(workspace, "Disabled tool", issue)
-
-      trace = File.read!(trace_file)
-      lines = String.split(trace, "\n", trim: true)
-
-      assert Enum.any?(lines, fn line ->
-               if String.starts_with?(line, "JSON:") do
-                 payload =
-                   line
-                   |> String.trim_leading("JSON:")
-                   |> Jason.decode!()
-
-                 payload["id"] == 2 and get_in(payload, ["params", "dynamicTools"]) == []
-               else
-                 false
-               end
-             end)
-    after
-      File.rm_rf(test_root)
-    end
-  end
-
-  test "app server hard-fails tool requestUserInput approval prompts" do
-    test_root =
-      Path.join(
-        System.tmp_dir!(),
-        "symphony-elixir-app-server-tool-user-input-hard-fail-#{System.unique_integer([:positive])}"
+        "symphony-elixir-app-server-tool-user-input-auto-approve-#{System.unique_integer([:positive])}"
       )
 
     try do
       workspace_root = Path.join(test_root, "workspaces")
       workspace = Path.join(workspace_root, "MT-717")
       codex_binary = Path.join(test_root, "fake-codex")
-      trace_file = Path.join(test_root, "codex-tool-user-input-hard-fail.trace")
+      trace_file = Path.join(test_root, "codex-tool-user-input-auto-approve.trace")
       previous_trace = System.get_env("SYMP_TEST_CODEx_TRACE")
 
       on_exit(fn ->
@@ -680,28 +489,31 @@ defmodule SymphonyElixir.AppServerTest do
 
       File.write!(codex_binary, """
       #!/bin/sh
-      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-tool-user-input-hard-fail.trace}"
+      trace_file="${SYMP_TEST_CODEx_TRACE:-/tmp/codex-tool-user-input-auto-approve.trace}"
       count=0
       while IFS= read -r line; do
         count=$((count + 1))
-        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+        printf 'JSON:%s\\n' \"$line\" >> \"$trace_file\"
 
-        case "$count" in
+        case \"$count\" in
           1)
-            printf '%s\\n' '{"id":1,"result":{}}'
+            printf '%s\\n' '{\"id\":1,\"result\":{}}'
             ;;
           2)
             ;;
           3)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-717"}}}'
+            printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-717\"}}}'
             ;;
           4)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-717"}}}'
-            sleep 1
-            printf '%s\\n' '{"id":110,"method":"item/tool/requestUserInput","params":{"itemId":"call-717","questions":[{"header":"Approve app tool call?","id":"mcp_tool_call_approval_call-717","isOther":false,"isSecret":false,"options":[{"description":"Run the tool and continue.","label":"Approve Once"},{"description":"Run the tool and remember this choice for this session.","label":"Approve this Session"},{"description":"Decline this tool call and continue.","label":"Deny"},{"description":"Cancel this tool call","label":"Cancel"}],"question":"The linear MCP server wants to run the tool Save issue, which may modify or delete data. Allow this action?"}],"threadId":"thread-717","turnId":"turn-717"}}'
+            printf '%s\\n' '{\"id\":3,\"result\":{\"turn\":{\"id\":\"turn-717\"}}}'
+            printf '%s\\n' '{\"id\":110,\"method\":\"item/tool/requestUserInput\",\"params\":{\"itemId\":\"call-717\",\"questions\":[{\"header\":\"Approve app tool call?\",\"id\":\"mcp_tool_call_approval_call-717\",\"isOther\":false,\"isSecret\":false,\"options\":[{\"description\":\"Run the tool and continue.\",\"label\":\"Approve Once\"},{\"description\":\"Run the tool and remember this choice for this session.\",\"label\":\"Approve this Session\"},{\"description\":\"Decline this tool call and continue.\",\"label\":\"Deny\"},{\"description\":\"Cancel this tool call\",\"label\":\"Cancel\"}],\"question\":\"The linear MCP server wants to run the tool \\\"Save issue\\\", which may modify or delete data. Allow this action?\"}],\"threadId\":\"thread-717\",\"turnId\":\"turn-717\"}}'
+            ;;
+          5)
+            printf '%s\\n' '{\"method\":\"turn/completed\"}'
+            exit 0
             ;;
           *)
-            sleep 1
+            exit 0
             ;;
         esac
       done
@@ -716,28 +528,40 @@ defmodule SymphonyElixir.AppServerTest do
       )
 
       issue = %Issue{
-        id: "issue-tool-user-input-hard-fail",
+        id: "issue-tool-user-input-auto-approve",
         identifier: "MT-717",
-        title: "Hard fail tool request user input",
-        description: "Ensure app tool approval prompts fail unattended runs",
+        title: "Auto approve MCP tool request user input",
+        description: "Ensure app tool approval prompts continue automatically",
         state: "In Progress",
         url: "https://example.org/issues/MT-717",
         labels: ["backend"]
       }
 
-      assert {:error, {:turn_input_required, payload}} =
-               AppServer.run(workspace, "Handle tool approval prompt", issue)
-
-      assert payload["method"] == "item/tool/requestUserInput"
+      assert {:ok, _result} = AppServer.run(workspace, "Handle tool approval prompt", issue)
 
       trace = File.read!(trace_file)
-      refute trace =~ ~s({"id":110,"result")
+      lines = String.split(trace, "\n", trim: true)
+
+      assert Enum.any?(lines, fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 payload =
+                   line
+                   |> String.trim_leading("JSON:")
+                   |> Jason.decode!()
+
+                 payload["id"] == 110 and
+                   get_in(payload, ["result", "answers", "mcp_tool_call_approval_call-717", "answers"]) ==
+                     ["Approve this Session"]
+               else
+                 false
+               end
+             end)
     after
       File.rm_rf(test_root)
     end
   end
 
-  test "app server hard-fails freeform tool input prompts" do
+  test "app server sends a generic non-interactive answer for freeform tool input prompts" do
     test_root =
       Path.join(
         System.tmp_dir!(),
@@ -769,8 +593,12 @@ defmodule SymphonyElixir.AppServerTest do
             printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-718"}}}'
             printf '%s\\n' '{"id":111,"method":"item/tool/requestUserInput","params":{"itemId":"call-718","questions":[{"header":"Provide context","id":"freeform-718","isOther":false,"isSecret":false,"options":null,"question":"What comment should I post back to the issue?"}],"threadId":"thread-718","turnId":"turn-718"}}'
             ;;
+          5)
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
           *)
-            sleep 1
+            exit 0
             ;;
         esac
       done
@@ -787,17 +615,23 @@ defmodule SymphonyElixir.AppServerTest do
       issue = %Issue{
         id: "issue-tool-user-input-required",
         identifier: "MT-718",
-        title: "Hard fail freeform tool input",
-        description: "Ensure arbitrary tool prompts fail unattended runs",
+        title: "Non interactive tool input answer",
+        description: "Ensure arbitrary tool prompts receive a generic answer",
         state: "In Progress",
         url: "https://example.org/issues/MT-718",
         labels: ["backend"]
       }
 
-      assert {:error, {:turn_input_required, payload}} =
-               AppServer.run(workspace, "Handle generic tool input", issue)
+      on_message = fn message -> send(self(), {:app_server_message, message}) end
 
-      assert payload["method"] == "item/tool/requestUserInput"
+      assert {:ok, _result} =
+               AppServer.run(workspace, "Handle generic tool input", issue, on_message: on_message)
+
+      assert_received {:app_server_message,
+                       %{
+                         event: :tool_input_auto_answered,
+                         answer: "This is a non-interactive session. Operator input is unavailable."
+                       }}
     after
       File.rm_rf(test_root)
     end
@@ -834,26 +668,27 @@ defmodule SymphonyElixir.AppServerTest do
       count=0
       while IFS= read -r line; do
         count=$((count + 1))
-        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+        printf 'JSON:%s\\n' \"$line\" >> \"$trace_file\"
 
-        case "$count" in
+        case \"$count\" in
           1)
-            printf '%s\\n' '{"id":1,"result":{}}'
+            printf '%s\\n' '{\"id\":1,\"result\":{}}'
             ;;
           2)
             ;;
           3)
-            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-719"}}}'
+            printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{\"id\":\"thread-719\"}}}'
             ;;
           4)
-            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-719"}}}'
-            printf '%s\\n' '{"id":112,"method":"item/tool/requestUserInput","params":{"itemId":"call-719","questions":[{"header":"Choose an action","id":"options-719","isOther":false,"isSecret":false,"options":[{"description":"Use the default behavior.","label":"Use default"},{"description":"Skip this step.","label":"Skip"}],"question":"How should I proceed?"}],"threadId":"thread-719","turnId":"turn-719"}}'
+            printf '%s\\n' '{\"id\":3,\"result\":{\"turn\":{\"id\":\"turn-719\"}}}'
+            printf '%s\\n' '{\"id\":112,\"method\":\"item/tool/requestUserInput\",\"params\":{\"itemId\":\"call-719\",\"questions\":[{\"header\":\"Choose an action\",\"id\":\"options-719\",\"isOther\":false,\"isSecret\":false,\"options\":[{\"description\":\"Use the default behavior.\",\"label\":\"Use default\"},{\"description\":\"Skip this step.\",\"label\":\"Skip\"}],\"question\":\"How should I proceed?\"}],\"threadId\":\"thread-719\",\"turnId\":\"turn-719\"}}'
             ;;
           5)
-            printf '%s\\n' '{"method":"turn/completed","params":{}}'
+            printf '%s\\n' '{\"method\":\"turn/completed\"}'
+            exit 0
             ;;
           *)
-            sleep 1
+            exit 0
             ;;
         esac
       done
@@ -990,9 +825,8 @@ defmodule SymphonyElixir.AppServerTest do
 
                  payload["id"] == 101 and
                    get_in(payload, ["result", "success"]) == false and
-                   get_in(payload, ["result", "contentItems", Access.at(0), "type"]) == "inputText" and
                    String.contains?(
-                     get_in(payload, ["result", "contentItems", Access.at(0), "text"]),
+                     get_in(payload, ["result", "output"]),
                      "Unsupported dynamic tool"
                    )
                else
@@ -1115,7 +949,7 @@ defmodule SymphonyElixir.AppServerTest do
 
                  payload["id"] == 102 and
                    get_in(payload, ["result", "success"]) == true and
-                   get_in(payload, ["result", "contentItems", Access.at(0), "text"]) ==
+                   get_in(payload, ["result", "output"]) ==
                      ~s({"data":{"viewer":{"id":"usr_123"}}})
                else
                  false
@@ -1359,7 +1193,285 @@ defmodule SymphonyElixir.AppServerTest do
           assert {:ok, _result} = AppServer.run(workspace, "Capture stderr log", issue)
         end)
 
-      assert log =~ "Codex stderr output: warning: this is stderr noise"
+      assert log =~ "Codex turn stream output: warning: this is stderr noise"
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server launches over ssh for remote workers" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-remote-ssh-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+    end)
+
+    try do
+      trace_file = Path.join(test_root, "ssh.trace")
+      fake_ssh = Path.join(test_root, "ssh")
+      remote_workspace = "/remote/workspaces/MT-REMOTE"
+
+      File.mkdir_p!(test_root)
+      System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+      File.write!(fake_ssh, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+      count=0
+      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+
+      while IFS= read -r line; do
+        count=$((count + 1))
+        printf 'JSON:%s\\n' "$line" >> "$trace_file"
+
+        case "$count" in
+          1)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          2)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-remote"}}}'
+            ;;
+          3)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-remote"}}}'
+            ;;
+          4)
+            printf '%s\\n' '{"method":"turn/completed"}'
+            exit 0
+            ;;
+          *)
+            exit 0
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(fake_ssh, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: "/remote/workspaces",
+        codex_command: "fake-remote-codex app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-remote",
+        identifier: "MT-REMOTE",
+        title: "Run remote app server",
+        description: "Validate ssh-backed codex startup",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-REMOTE",
+        labels: ["backend"]
+      }
+
+      assert {:ok, _result} =
+               AppServer.run(
+                 remote_workspace,
+                 "Run remote worker",
+                 issue,
+                 worker_host: "worker-01:2200"
+               )
+
+      trace = File.read!(trace_file)
+      lines = String.split(trace, "\n", trim: true)
+
+      assert argv_line = Enum.find(lines, &String.starts_with?(&1, "ARGV:"))
+      assert argv_line =~ "-T -p 2200 worker-01 bash -lc"
+      assert argv_line =~ "cd "
+      assert argv_line =~ remote_workspace
+      assert argv_line =~ "exec "
+      assert argv_line =~ "fake-remote-codex app-server"
+
+      expected_turn_policy = %{
+        "type" => "workspaceWrite",
+        "writableRoots" => [remote_workspace],
+        "readOnlyAccess" => %{"type" => "fullAccess"},
+        "networkAccess" => false,
+        "excludeTmpdirEnvVar" => false,
+        "excludeSlashTmp" => false
+      }
+
+      assert Enum.any?(lines, fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 line
+                 |> String.trim_leading("JSON:")
+                 |> Jason.decode!()
+                 |> then(fn payload ->
+                   payload["method"] == "thread/start" &&
+                     get_in(payload, ["params", "cwd"]) == remote_workspace
+                 end)
+               else
+                 false
+               end
+             end)
+
+      assert Enum.any?(lines, fn line ->
+               if String.starts_with?(line, "JSON:") do
+                 line
+                 |> String.trim_leading("JSON:")
+                 |> Jason.decode!()
+                 |> then(fn payload ->
+                   payload["method"] == "turn/start" &&
+                     get_in(payload, ["params", "cwd"]) == remote_workspace &&
+                     get_in(payload, ["params", "sandboxPolicy"]) == expected_turn_policy
+                 end)
+               else
+                 false
+               end
+             end)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server maps startup read timeout to response_timeout" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-response-timeout-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-TIMEOUT")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      while IFS= read -r _line; do
+        sleep 1
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server",
+        codex_read_timeout_ms: 10
+      )
+
+      issue = %Issue{
+        id: "issue-response-timeout",
+        identifier: "MT-TIMEOUT",
+        title: "Response timeout",
+        description: "Startup request should time out cleanly",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-TIMEOUT",
+        labels: ["backend"]
+      }
+
+      assert {:error, :response_timeout} = AppServer.run(workspace, "Timeout", issue)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server maps early subprocess exit to port_exit" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-port-exit-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-EXIT")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      exit 17
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server"
+      )
+
+      issue = %Issue{
+        id: "issue-port-exit",
+        identifier: "MT-EXIT",
+        title: "Port exit",
+        description: "Startup should surface process exit",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-EXIT",
+        labels: ["backend"]
+      }
+
+      assert {:error, {:port_exit, 17}} = AppServer.run(workspace, "Exit", issue)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "app server maps hung turn streams to turn_timeout" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-app-server-turn-timeout-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      workspace = Path.join(workspace_root, "MT-TURN-TIMEOUT")
+      codex_binary = Path.join(test_root, "fake-codex")
+      File.mkdir_p!(workspace)
+
+      File.write!(codex_binary, """
+      #!/bin/sh
+      count=0
+      while IFS= read -r _line; do
+        count=$((count + 1))
+
+        case "$count" in
+          1)
+            printf '%s\\n' '{"id":1,"result":{}}'
+            ;;
+          2)
+            printf '%s\\n' '{"id":2,"result":{"thread":{"id":"thread-timeout"}}}'
+            ;;
+          3)
+            printf '%s\\n' '{"id":3,"result":{"turn":{"id":"turn-timeout"}}}'
+            sleep 1
+            ;;
+          *)
+            sleep 1
+            ;;
+        esac
+      done
+      """)
+
+      File.chmod!(codex_binary, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        codex_command: "#{codex_binary} app-server",
+        codex_turn_timeout_ms: 10
+      )
+
+      issue = %Issue{
+        id: "issue-turn-timeout",
+        identifier: "MT-TURN-TIMEOUT",
+        title: "Turn timeout",
+        description: "Turn stream should time out cleanly",
+        state: "In Progress",
+        url: "https://example.org/issues/MT-TURN-TIMEOUT",
+        labels: ["backend"]
+      }
+
+      assert {:error, :turn_timeout} = AppServer.run(workspace, "Turn timeout", issue)
     after
       File.rm_rf(test_root)
     end
