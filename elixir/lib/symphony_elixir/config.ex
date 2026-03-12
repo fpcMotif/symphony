@@ -53,10 +53,10 @@ defmodule SymphonyElixir.Config do
                                keys: [
                                  kind: [type: {:or, [:string, nil]}, default: nil],
                                  adapter_module: [
-          type: {:or, [:string, nil]},
-          default: nil
-        ],
-        endpoint: [type: :string, default: @default_linear_endpoint],
+                                   type: {:or, [:string, nil]},
+                                   default: nil
+                                 ],
+                                 endpoint: [type: :string, default: @default_linear_endpoint],
                                  api_key: [type: {:or, [:string, nil]}, default: nil],
                                  project_slug: [type: {:or, [:string, nil]}, default: nil],
                                  assignee: [type: {:or, [:string, nil]}, default: nil],
