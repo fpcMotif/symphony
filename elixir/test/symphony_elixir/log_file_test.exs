@@ -97,4 +97,52 @@ defmodule SymphonyElixir.LogFileTest do
     # Should not raise, should log a warning and return :ok
     assert :ok = LogFile.configure()
   end
+
+  test "configure/0 gracefully handles generic removal errors for handlers" do
+    :meck.new(:logger, [:unstick, :passthrough])
+
+    # We want remove_handler to return an error when it tries to remove the default console handler.
+    # To get to remove_default_console_handler, add_handler must return :ok.
+    # We don't want to mock add_handler entirely, but we need remove_handler to fail for :default.
+    :meck.expect(:logger, :remove_handler, fn
+      :default -> {:error, :simulated_error_for_test}
+      handler_id -> :meck.passthrough([handler_id])
+    end)
+
+    on_exit(fn ->
+      try do
+        :meck.unload(:logger)
+      catch
+        :error, {:not_mocked, :logger} -> :ok
+        :exit, _ -> :ok
+      end
+    end)
+
+    # ensure default is present before configuring so that add_handler succeeds
+    if match?({:error, _}, :logger.get_handler_config(:default)) do
+      :logger.add_handler(:default, :logger_std_h, %{})
+    end
+
+    assert :ok = LogFile.configure()
+  end
+
+  test "configure/0 gracefully handles generic removal errors for existing handlers" do
+    :meck.new(:logger, [:unstick, :passthrough])
+
+    :meck.expect(:logger, :remove_handler, fn
+      :symphony_disk_log -> {:error, :simulated_error_for_test}
+      handler_id -> :meck.passthrough([handler_id])
+    end)
+
+    on_exit(fn ->
+      try do
+        :meck.unload(:logger)
+      catch
+        :error, {:not_mocked, :logger} -> :ok
+        :exit, _ -> :ok
+      end
+    end)
+
+    assert :ok = LogFile.configure()
+  end
 end
