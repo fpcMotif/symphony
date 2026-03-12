@@ -2114,8 +2114,6 @@ Use the same validation profiles as Section 17:
 - Optional `linear_graphql` client-side tool extension exposes raw Linear GraphQL access through the
   app-server session using configured Symphony auth.
 - TODO: Persist retry queue and session metadata across process restarts.
-- TODO: Add first-class tracker write APIs (comments/state transitions) in the orchestrator instead
-  of only via agent tools.
 - TODO: Add pluggable issue tracker adapters beyond Linear.
 
 ### 18.3 Operational Validation Before Production (Recommended)
