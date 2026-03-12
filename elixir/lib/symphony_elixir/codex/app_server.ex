@@ -445,16 +445,15 @@ defmodule SymphonyElixir.Codex.AppServer do
          auto_approve_requests
        )
        when is_binary(method) do
-    handle_turn_method(
-      port,
-      on_message,
-      payload,
-      payload_string,
-      method,
-      timeout_ms,
-      tool_executor,
-      auto_approve_requests
-    )
+    state = %{
+      port: port,
+      on_message: on_message,
+      timeout_ms: timeout_ms,
+      tool_executor: tool_executor,
+      auto_approve_requests: auto_approve_requests
+    }
+
+    handle_turn_method(method, payload, payload_string, state)
   end
 
   defp handle_decoded(
@@ -516,28 +515,24 @@ defmodule SymphonyElixir.Codex.AppServer do
     )
   end
 
-  defp handle_turn_method(
-         port,
-         on_message,
-         payload,
-         payload_string,
-         method,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
-       ) do
+  defp handle_turn_method(method, payload, payload_string, state) do
+    %{
+      port: port,
+      on_message: on_message,
+      timeout_ms: timeout_ms,
+      tool_executor: tool_executor,
+      auto_approve_requests: auto_approve_requests
+    } = state
+
     metadata = metadata_from_message(port, payload)
 
     approval_status =
       maybe_handle_approval_request(
-        port,
         method,
         payload,
         payload_string,
-        on_message,
         metadata,
-        tool_executor,
-        auto_approve_requests
+        state
       )
 
     status =
@@ -588,36 +583,28 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/commandExecution/requestApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         state
        ) do
     approve_or_require(
-      port,
       id,
       "acceptForSession",
       payload,
       payload_string,
-      on_message,
       metadata,
-      auto_approve_requests
+      state
     )
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/tool/call",
          %{"id" => id, "params" => params} = payload,
          payload_string,
-         on_message,
          metadata,
-         tool_executor,
-         _auto_approve_requests
+         %{port: port, tool_executor: tool_executor, on_message: on_message} = _state
        ) do
     tool_name = tool_call_name(params)
     arguments = tool_call_arguments(params)
@@ -642,80 +629,62 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "execCommandApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         state
        ) do
     approve_or_require(
-      port,
       id,
       "approved_for_session",
       payload,
       payload_string,
-      on_message,
       metadata,
-      auto_approve_requests
+      state
     )
   end
 
   defp maybe_handle_approval_request(
-         port,
          "applyPatchApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         state
        ) do
     approve_or_require(
-      port,
       id,
       "approved_for_session",
       payload,
       payload_string,
-      on_message,
       metadata,
-      auto_approve_requests
+      state
     )
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/fileChange/requestApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         state
        ) do
     approve_or_require(
-      port,
       id,
       "acceptForSession",
       payload,
       payload_string,
-      on_message,
       metadata,
-      auto_approve_requests
+      state
     )
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/tool/requestUserInput",
          %{"id" => id, "params" => params} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         _auto_approve_requests
+         %{port: port, on_message: on_message} = _state
        ) do
     case classify_tool_request_user_input(params) do
       :option_prompt ->
@@ -738,27 +707,22 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         _port,
          _method,
          _payload,
          _payload_string,
-         _on_message,
          _metadata,
-         _tool_executor,
-         _auto_approve_requests
+         _state
        ) do
     :unhandled
   end
 
   defp approve_or_require(
-         port,
          id,
          decision,
          payload,
          payload_string,
-         on_message,
          metadata,
-         true
+         %{port: port, on_message: on_message, auto_approve_requests: true} = _state
        ) do
     send_message(port, %{"id" => id, "result" => %{"decision" => decision}})
 
@@ -773,14 +737,12 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp approve_or_require(
-         _port,
          _id,
          _decision,
          _payload,
          _payload_string,
-         _on_message,
          _metadata,
-         false
+         %{auto_approve_requests: false} = _state
        ) do
     :approval_required
   end
