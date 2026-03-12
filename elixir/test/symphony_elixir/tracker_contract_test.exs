@@ -111,6 +111,17 @@ defmodule SymphonyElixir.TrackerContractTest do
     end
   end
 
+  describe "custom adapter contract" do
+    test "uses configured custom adapter when tracker_kind is custom" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "custom",
+        tracker_adapter_module: "SymphonyElixir.TrackerContractInvalidAdapterStub"
+      )
+
+      assert {:error, {:invalid_adapter_response, :create_comment}} = Tracker.create_comment("issue-1", "body")
+    end
+  end
+
   describe "linear adapter contract" do
     test "normalizes malformed inputs before delegating" do
       write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")

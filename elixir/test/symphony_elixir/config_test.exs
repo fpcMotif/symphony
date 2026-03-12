@@ -48,6 +48,21 @@ defmodule SymphonyElixir.ConfigTest do
     assert Config.max_concurrent_agents_for_state(:todo) == 9
   end
 
+  test "validate! supports custom tracker kind when adapter_module is provided" do
+    write_workflow_file!(Workflow.workflow_file_path(),
+      tracker_kind: "custom",
+      tracker_adapter_module: "MyApp.Tracker"
+    )
+
+    assert :ok = Config.validate!()
+  end
+
+  test "validate! rejects custom tracker kind when adapter_module is missing" do
+    write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom")
+
+    assert {:error, :missing_tracker_adapter_module} = Config.validate!()
+  end
+
   test "validate! rejects unsupported tracker kinds" do
     write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "jira")
 
