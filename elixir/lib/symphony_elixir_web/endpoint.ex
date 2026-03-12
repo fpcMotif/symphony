@@ -27,18 +27,27 @@ defmodule SymphonyElixirWeb.Endpoint do
   plug(SymphonyElixirWeb.Router)
 
   @doc false
+  @spec session_options() :: keyword()
   def session_options do
     [
       store: :cookie,
       key: "_symphony_elixir_key",
-      signing_salt:
-        System.get_env("SESSION_SIGNING_SALT") ||
-          Application.get_env(:symphony_elixir, :session_signing_salt, "8-bytes-random-default")
+      signing_salt: Application.get_env(:symphony_elixir, :session_signing_salt, "16-bytes-random-default-salt")
     ]
   end
 
   defp dynamic_session(conn, _opts) do
-    opts = Plug.Session.init(session_options())
+    opts =
+      case :persistent_term.get({__MODULE__, :session_opts}, nil) do
+        nil ->
+          init_opts = Plug.Session.init(session_options())
+          :persistent_term.put({__MODULE__, :session_opts}, init_opts)
+          init_opts
+
+        val ->
+          val
+      end
+
     Plug.Session.call(conn, opts)
   end
 end
