@@ -113,7 +113,7 @@ endpoint_config =
   |> Keyword.merge(
     server: true,
     http: [ip: {127, 0, 0, 1}, port: port],
-    check_origin: true,
+    check_origin: false,
     orchestrator: orchestrator_name,
     snapshot_timeout_ms: 500
   )
