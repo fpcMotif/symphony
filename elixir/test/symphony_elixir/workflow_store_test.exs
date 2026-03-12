@@ -132,6 +132,30 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     assert new_workflow.prompt == "Polled Prompt"
   end
 
+  test "polls and updates state automatically when workflow file is changed without force_reload", %{workflow_file: workflow_file} do
+    # Verify initial state
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+
+    # Modify the file, explicitly not calling force_reload
+    File.write!(workflow_file, """
+    ---
+    tracker:
+      kind: "linear"
+    ---
+    File Changed Prompt
+    """)
+
+    # Manually trigger the :poll message to avoid slow Process.sleep
+    send(Process.whereis(WorkflowStore), :poll)
+
+    # Small sleep to allow GenServer to process message
+    Process.sleep(50)
+
+    {:ok, new_workflow} = WorkflowStore.current()
+    assert new_workflow.prompt == "File Changed Prompt"
+  end
+
   test "current/0 falls back to Workflow.load when GenServer is not running", %{workflow_file: _workflow_file} do
     stop_workflow_store!()
 
@@ -166,6 +190,19 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     Workflow.set_workflow_file_path(missing_path)
 
     assert {:error, {:missing_workflow_file, ^missing_path, :enoent}} = WorkflowStore.start_link([])
+  end
+
+  test "start_link/0 starts the GenServer with default options" do
+    stop_workflow_store!()
+
+    # We verify that start_link() without arguments works
+    assert {:ok, pid} = WorkflowStore.start_link()
+    assert is_pid(pid)
+    assert Process.alive?(pid)
+    assert Process.whereis(WorkflowStore) == pid
+
+    # Clean up what we started so we don't pollute other tests
+    GenServer.stop(pid)
   end
 
   test "start_link/1 fails when workflow file has invalid YAML" do
