@@ -153,6 +153,14 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     assert {:error, {:missing_workflow_file, _, :enoent}} = WorkflowStore.force_reload()
   end
 
+  test "start_link/0 starts the GenServer with default options", %{workflow_file: _workflow_file} do
+    stop_workflow_store!()
+    Process.flag(:trap_exit, true)
+
+    assert {:ok, pid} = WorkflowStore.start_link()
+    assert is_pid(pid)
+  end
+
   test "start_link/1 fails when workflow file is missing" do
     stop_workflow_store!()
     Process.flag(:trap_exit, true)
