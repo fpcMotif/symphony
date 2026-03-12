@@ -187,6 +187,7 @@ defmodule SymphonyElixir.WorkflowStoreTest do
 
     File.rm_rf!(invalid_root)
   end
+
   test "start_link/1 fails when workflow file has invalid YAML" do
     stop_workflow_store!()
     Process.flag(:trap_exit, true)
