@@ -59,8 +59,20 @@ defmodule SymphonyElixir.Tracker do
   def adapter do
     Application.get_env(:symphony_elixir, :tracker_adapter_module) ||
       case Config.tracker_kind() do
-        "memory" -> SymphonyElixir.Tracker.Memory
-        _ -> SymphonyElixir.Linear.Adapter
+        "custom" ->
+          case Config.tracker_adapter_module() do
+            module_name when is_binary(module_name) ->
+              String.to_atom("Elixir." <> String.replace(module_name, ~r/^Elixir\./, ""))
+            _ ->
+              # Fallback or raise error when missing, but it should be caught by Config.validate!
+              raise ArgumentError, "Missing required tracker_adapter_module for custom tracker kind"
+          end
+
+        "memory" ->
+          SymphonyElixir.Tracker.Memory
+
+        _ ->
+          SymphonyElixir.Linear.Adapter
       end
   end
 

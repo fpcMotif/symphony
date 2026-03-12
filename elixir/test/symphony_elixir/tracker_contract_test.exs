@@ -1,3 +1,13 @@
+defmodule SymphonyElixir.TrackerContractCustomAdapterStub do
+  @moduledoc false
+
+  def fetch_candidate_issues, do: {:ok, [:custom]}
+  def fetch_issues_by_states(_states), do: {:ok, [:custom]}
+  def fetch_issue_states_by_ids(_ids), do: {:ok, [:custom]}
+  def create_comment(_issue_id, _body), do: :ok
+  def update_issue_state(_issue_id, _state_name), do: :ok
+end
+
 defmodule SymphonyElixir.TrackerContractLinearClientStub do
   @moduledoc false
 
@@ -108,6 +118,20 @@ defmodule SymphonyElixir.TrackerContractTest do
 
       assert {:error, :invalid_states} = Tracker.fetch_issues_by_states("Todo")
       assert {:error, :invalid_issue_ids} = Tracker.fetch_issue_states_by_ids(%{id: "I-1"})
+    end
+  end
+
+  describe "custom adapter contract" do
+    test "resolves and delegates to custom adapter module" do
+      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: "Elixir.SymphonyElixir.TrackerContractCustomAdapterStub")
+
+      assert :ok = Config.validate!()
+
+      assert {:ok, [:custom]} = Tracker.fetch_candidate_issues()
+      assert {:ok, [:custom]} = Tracker.fetch_issues_by_states(["Todo"])
+      assert {:ok, [:custom]} = Tracker.fetch_issue_states_by_ids(["I-1"])
+      assert :ok = Tracker.create_comment("I-1", "body")
+      assert :ok = Tracker.update_issue_state("I-1", "Done")
     end
   end
 
