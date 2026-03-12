@@ -48,12 +48,14 @@ defmodule SymphonyElixir.Orchestrator do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
+  @doc "Creates a comment on an issue via the tracker API."
   @spec create_comment(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
   def create_comment(server \\ __MODULE__, issue_id, body)
       when is_binary(issue_id) and is_binary(body) do
     GenServer.call(server, {:create_comment, issue_id, body})
   end
 
+  @doc "Updates the state of an issue via the tracker API."
   @spec update_issue_state(GenServer.server(), String.t(), String.t()) :: :ok | {:error, term()}
   def update_issue_state(server \\ __MODULE__, issue_id, state_name)
       when is_binary(issue_id) and is_binary(state_name) do
