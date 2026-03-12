@@ -277,24 +277,25 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp await_turn_completion(port, on_message, tool_executor, auto_approve_requests) do
-    receive_loop(port, on_message, Config.codex_turn_timeout_ms(), "", tool_executor, auto_approve_requests)
+    state = %{
+      port: port,
+      on_message: on_message,
+      timeout_ms: Config.codex_turn_timeout_ms(),
+      tool_executor: tool_executor,
+      auto_approve_requests: auto_approve_requests
+    }
+
+    receive_loop("", state)
   end
 
-  defp receive_loop(port, on_message, timeout_ms, pending_line, tool_executor, auto_approve_requests) do
+  defp receive_loop(pending_line, %{port: port, timeout_ms: timeout_ms} = state) do
     receive do
       {^port, {:data, {:eol, chunk}}} ->
         complete_line = pending_line <> to_string(chunk)
-        handle_incoming(port, on_message, complete_line, timeout_ms, tool_executor, auto_approve_requests)
+        handle_incoming(complete_line, state)
 
       {^port, {:data, {:noeol, chunk}}} ->
-        receive_loop(
-          port,
-          on_message,
-          timeout_ms,
-          pending_line <> to_string(chunk),
-          tool_executor,
-          auto_approve_requests
-        )
+        receive_loop(pending_line <> to_string(chunk), state)
 
       {^port, {:exit_status, status}} ->
         {:error, {:port_exit, status}}
@@ -304,90 +305,33 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp handle_incoming(port, on_message, data, timeout_ms, tool_executor, auto_approve_requests) do
+  defp handle_incoming(data, state) do
     payload_string = to_string(data)
 
     Jason.decode(payload_string)
-    |> handle_decoded(
-      payload_string,
-      port,
-      on_message,
-      timeout_ms,
-      tool_executor,
-      auto_approve_requests
-    )
+    |> handle_decoded(payload_string, state)
   end
 
-  defp handle_decoded(
-         {:ok, %{"method" => "turn/completed"} = payload},
-         payload_string,
-         port,
-         on_message,
-         _timeout_ms,
-         _tool_executor,
-         _auto_approve_requests
-       ) do
+  defp handle_decoded({:ok, %{"method" => "turn/completed"} = payload}, payload_string, %{on_message: on_message, port: port}) do
     emit_turn_event(on_message, :turn_completed, payload, payload_string, port, payload)
     {:ok, :turn_completed}
   end
 
-  defp handle_decoded(
-         {:ok, %{"method" => "turn/failed", "params" => params} = payload},
-         payload_string,
-         port,
-         on_message,
-         _timeout_ms,
-         _tool_executor,
-         _auto_approve_requests
-       ) do
+  defp handle_decoded({:ok, %{"method" => "turn/failed", "params" => params} = payload}, payload_string, %{on_message: on_message, port: port}) do
     emit_turn_event(on_message, :turn_failed, payload, payload_string, port, params)
     {:error, {:turn_failed, params}}
   end
 
-  defp handle_decoded(
-         {:ok, %{"method" => "turn/cancelled", "params" => params} = payload},
-         payload_string,
-         port,
-         on_message,
-         _timeout_ms,
-         _tool_executor,
-         _auto_approve_requests
-       ) do
+  defp handle_decoded({:ok, %{"method" => "turn/cancelled", "params" => params} = payload}, payload_string, %{on_message: on_message, port: port}) do
     emit_turn_event(on_message, :turn_cancelled, payload, payload_string, port, params)
     {:error, {:turn_cancelled, params}}
   end
 
-  defp handle_decoded(
-         {:ok, %{"method" => method} = payload},
-         payload_string,
-         port,
-         on_message,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
-       )
-       when is_binary(method) do
-    handle_turn_method(
-      port,
-      on_message,
-      payload,
-      payload_string,
-      method,
-      timeout_ms,
-      tool_executor,
-      auto_approve_requests
-    )
+  defp handle_decoded({:ok, %{"method" => method} = payload}, payload_string, state) when is_binary(method) do
+    handle_turn_method(method, payload, payload_string, state)
   end
 
-  defp handle_decoded(
-         {:ok, payload},
-         payload_string,
-         port,
-         on_message,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
-       ) do
+  defp handle_decoded({:ok, payload}, payload_string, %{on_message: on_message, port: port} = state) do
     emit_message(
       on_message,
       :other_message,
@@ -398,18 +342,10 @@ defmodule SymphonyElixir.Codex.AppServer do
       metadata_from_message(port, payload)
     )
 
-    receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+    receive_loop("", state)
   end
 
-  defp handle_decoded(
-         {:error, _reason},
-         payload_string,
-         port,
-         on_message,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
-       ) do
+  defp handle_decoded({:error, _reason}, payload_string, %{on_message: on_message, port: port} = state) do
     log_non_json_stream_line(payload_string, "turn stream")
 
     emit_message(
@@ -422,7 +358,7 @@ defmodule SymphonyElixir.Codex.AppServer do
       metadata_from_message(port, %{raw: payload_string})
     )
 
-    receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+    receive_loop("", state)
   end
 
   defp emit_turn_event(on_message, event, payload, payload_string, port, payload_details) do
@@ -438,28 +374,16 @@ defmodule SymphonyElixir.Codex.AppServer do
     )
   end
 
-  defp handle_turn_method(
-         port,
-         on_message,
-         payload,
-         payload_string,
-         method,
-         timeout_ms,
-         tool_executor,
-         auto_approve_requests
-       ) do
+  defp handle_turn_method(method, payload, payload_string, %{port: port, on_message: on_message} = state) do
     metadata = metadata_from_message(port, payload)
 
     approval_status =
       maybe_handle_approval_request(
-        port,
         method,
         payload,
         payload_string,
-        on_message,
         metadata,
-        tool_executor,
-        auto_approve_requests
+        state
       )
 
     status =
@@ -491,7 +415,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         {:error, {:approval_required, payload}}
 
       :approved ->
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop("", state)
 
       :unhandled ->
         emit_message(
@@ -505,19 +429,16 @@ defmodule SymphonyElixir.Codex.AppServer do
         )
 
         Logger.debug("Codex notification: #{inspect(method)}")
-        receive_loop(port, on_message, timeout_ms, "", tool_executor, auto_approve_requests)
+        receive_loop("", state)
     end
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/commandExecution/requestApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         %{port: port, on_message: on_message, auto_approve_requests: auto_approve_requests}
        ) do
     approve_or_require(
       port,
@@ -532,14 +453,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/tool/call",
          %{"id" => id, "params" => params} = payload,
          payload_string,
-         on_message,
          metadata,
-         tool_executor,
-         _auto_approve_requests
+         %{port: port, on_message: on_message, tool_executor: tool_executor}
        ) do
     tool_name = tool_call_name(params)
     arguments = tool_call_arguments(params)
@@ -564,14 +482,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "execCommandApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         %{port: port, on_message: on_message, auto_approve_requests: auto_approve_requests}
        ) do
     approve_or_require(
       port,
@@ -586,14 +501,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "applyPatchApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         %{port: port, on_message: on_message, auto_approve_requests: auto_approve_requests}
        ) do
     approve_or_require(
       port,
@@ -608,14 +520,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/fileChange/requestApproval",
          %{"id" => id} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         %{port: port, on_message: on_message, auto_approve_requests: auto_approve_requests}
        ) do
     approve_or_require(
       port,
@@ -630,14 +539,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         port,
          "item/tool/requestUserInput",
          %{"id" => id, "params" => params} = payload,
          payload_string,
-         on_message,
          metadata,
-         _tool_executor,
-         auto_approve_requests
+         %{port: port, on_message: on_message, auto_approve_requests: auto_approve_requests}
        ) do
     maybe_auto_answer_tool_request_user_input(
       port,
@@ -652,14 +558,11 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp maybe_handle_approval_request(
-         _port,
          _method,
          _payload,
          _payload_string,
-         _on_message,
          _metadata,
-         _tool_executor,
-         _auto_approve_requests
+         _state
        ) do
     :unhandled
   end
