@@ -200,13 +200,15 @@ defmodule SymphonyElixir.Orchestrator do
          true <- available_slots(state) > 0 do
       choose_issues(issues, state)
     else
-      false ->
-        state
-
-      {:error, error} ->
-        log_dispatch_error(error)
-        state
+      error_or_false -> handle_dispatch_failure(state, error_or_false)
     end
+  end
+
+  defp handle_dispatch_failure(state, false), do: state
+
+  defp handle_dispatch_failure(state, {:error, error}) do
+    log_dispatch_error(error)
+    state
   end
 
   defp log_dispatch_error(:missing_linear_api_token) do
