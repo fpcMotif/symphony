@@ -494,6 +494,7 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    start_time = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :normal})
     Process.sleep(50)
     state = :sys.get_state(pid)
@@ -502,7 +503,7 @@ defmodule SymphonyElixir.CoreTest do
     assert MapSet.member?(state.completed, issue_id)
     assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 250, 1_100)
+    assert_due_delay(due_at_ms, start_time, 1_000)
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -535,6 +536,7 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    start_time = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
     Process.sleep(50)
     state = :sys.get_state(pid)
@@ -542,7 +544,7 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 3, due_at_ms: due_at_ms, identifier: "MT-559", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 39_000, 40_500)
+    assert_due_delay(due_at_ms, start_time, 40_000, 1_000)
   end
 
   test "first abnormal worker exit waits before retrying" do
@@ -574,6 +576,7 @@ defmodule SymphonyElixir.CoreTest do
       |> Map.put(:retry_attempts, %{})
     end)
 
+    start_time = System.monotonic_time(:millisecond)
     send(pid, {:DOWN, ref, :process, self(), :boom})
     Process.sleep(50)
     state = :sys.get_state(pid)
@@ -581,14 +584,12 @@ defmodule SymphonyElixir.CoreTest do
     assert %{attempt: 1, due_at_ms: due_at_ms, identifier: "MT-560", error: "agent exited: :boom"} =
              state.retry_attempts[issue_id]
 
-    assert_due_in_range(due_at_ms, 8_750, 10_500)
+    assert_due_delay(due_at_ms, start_time, 10_000, 1_000)
   end
 
-  defp assert_due_in_range(due_at_ms, min_remaining_ms, max_remaining_ms) do
-    remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
-
-    assert remaining_ms >= min_remaining_ms
-    assert remaining_ms <= max_remaining_ms
+  defp assert_due_delay(due_at_ms, start_time, expected_delay_ms, delta \\ 500) do
+    actual_delay = due_at_ms - start_time
+    assert_in_delta actual_delay, expected_delay_ms, delta
   end
 
   test "fetch issues by states with empty state set is a no-op" do
