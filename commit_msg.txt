@@ -1,0 +1,18 @@
+🧹 [code health improvement] Remove unused dispatch_candidate function
+
+#### Context
+The `dispatch_candidate` function was an unused, public function in `orchestrator.ex` that was a duplicate of `dispatch_refreshed_candidate`.
+The `choose_issues` flow already uses `batch_dispatch_issues` correctly, making `dispatch_candidate` dead code.
+
+#### TL;DR
+Removed unused `dispatch_candidate` function.
+
+#### Summary
+- Removed `dispatch_candidate/5` from `SymphonyElixir.Orchestrator` since `batch_dispatch_issues` calls `dispatch_refreshed_candidate` instead.
+
+#### Alternatives
+N/A
+
+#### Test Plan
+- Run `mix test` and ensure all tests pass.
+- Run `mix format` and `mix credo --strict`.
