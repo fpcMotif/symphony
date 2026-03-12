@@ -1654,9 +1654,21 @@ defmodule SymphonyElixir.Orchestrator do
         {issue_id, Map.drop(metadata, [:pid, :ref, :issue])}
       end)
 
+    now_ms = System.monotonic_time(:millisecond)
+
+    stripped_retries =
+      Map.new(state.retry_attempts, fn {issue_id, retry} ->
+        due_in_ms = max(0, retry.due_at_ms - now_ms)
+
+        {issue_id,
+         retry
+         |> Map.drop([:timer_ref, :due_at_ms])
+         |> Map.put(:due_in_ms, due_in_ms)}
+      end)
+
     data = %{
       "running" => stripped_running,
-      "retry_attempts" => state.retry_attempts,
+      "retry_attempts" => stripped_retries,
       "codex_totals" => state.codex_totals,
       "codex_rate_limits" => state.codex_rate_limits
     }
@@ -1675,11 +1687,27 @@ defmodule SymphonyElixir.Orchestrator do
          {:ok, binary} <- File.read(state_file) do
       data = :erlang.binary_to_term(binary)
 
+      now_ms = System.monotonic_time(:millisecond)
+
+      restored_retries =
+        data
+        |> Map.get("retry_attempts", %{})
+        |> Map.new(fn {issue_id, retry} ->
+          due_in_ms = Map.get(retry, :due_in_ms, 0)
+          timer_ref = Process.send_after(self(), {:retry_issue, issue_id}, due_in_ms)
+
+          {issue_id,
+           retry
+           |> Map.drop([:due_in_ms])
+           |> Map.put(:due_at_ms, now_ms + due_in_ms)
+           |> Map.put(:timer_ref, timer_ref)}
+        end)
+
       state = %{
         state
         | codex_totals: Map.get(data, "codex_totals", state.codex_totals) || state.codex_totals,
           codex_rate_limits: Map.get(data, "codex_rate_limits", state.codex_rate_limits) || state.codex_rate_limits,
-          retry_attempts: Map.get(data, "retry_attempts", state.retry_attempts) || state.retry_attempts
+          retry_attempts: restored_retries || state.retry_attempts
       }
 
       running = Map.get(data, "running", %{})
