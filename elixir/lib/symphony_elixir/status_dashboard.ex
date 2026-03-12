@@ -330,48 +330,14 @@ defmodule SymphonyElixir.StatusDashboard do
   defp format_snapshot_content(snapshot_data, tps, terminal_columns_override \\ nil) do
     case snapshot_data do
       {:ok, %{running: running, retrying: retrying, codex_totals: codex_totals} = snapshot} ->
-        rate_limits = Map.get(snapshot, :rate_limits)
-        project_link_lines = format_project_link_lines()
-        project_refresh_line = format_project_refresh_line(Map.get(snapshot, :polling))
-        codex_input_tokens = Map.get(codex_totals, :input_tokens, 0)
-        codex_output_tokens = Map.get(codex_totals, :output_tokens, 0)
-        codex_total_tokens = Map.get(codex_totals, :total_tokens, 0)
-        codex_seconds_running = Map.get(codex_totals, :seconds_running, 0)
-        agent_count = length(running)
-        max_agents = Config.max_concurrent_agents()
         running_event_width = running_event_width(terminal_columns_override)
-        running_rows = format_running_rows(running, running_event_width)
-        running_to_backoff_spacer = if(running == [], do: [], else: ["│"])
-        backoff_rows = format_retry_rows(retrying)
 
-        ([
-           colorize("╭─ SYMPHONY STATUS", @ansi_bold),
-           colorize("│ Agents: ", @ansi_bold) <>
-             colorize("#{agent_count}", @ansi_green) <>
-             colorize("/", @ansi_gray) <>
-             colorize("#{max_agents}", @ansi_gray),
-           colorize("│ Throughput: ", @ansi_bold) <> colorize("#{format_tps(tps)} tps", @ansi_cyan),
-           colorize("│ Runtime: ", @ansi_bold) <>
-             colorize(format_runtime_seconds(codex_seconds_running), @ansi_magenta),
-           colorize("│ Tokens: ", @ansi_bold) <>
-             colorize("in #{format_count(codex_input_tokens)}", @ansi_yellow) <>
-             colorize(" | ", @ansi_gray) <>
-             colorize("out #{format_count(codex_output_tokens)}", @ansi_yellow) <>
-             colorize(" | ", @ansi_gray) <>
-             colorize("total #{format_count(codex_total_tokens)}", @ansi_yellow),
-           colorize("│ Rate Limits: ", @ansi_bold) <> format_rate_limits(rate_limits),
-           project_link_lines,
-           project_refresh_line,
-           colorize("├─ Running", @ansi_bold),
-           "│",
-           running_table_header_row(running_event_width),
-           running_table_separator_row(running_event_width)
-         ] ++
-           running_rows ++
-           running_to_backoff_spacer ++
-           [colorize("├─ Backoff queue", @ansi_bold), "│"] ++
-           backoff_rows ++
-           [closing_border()])
+        [
+          format_dashboard_header(snapshot, codex_totals, tps, length(running)),
+          format_running_section(running, running_event_width),
+          format_backoff_section(retrying),
+          [closing_border()]
+        ]
         |> List.flatten()
         |> Enum.join("\n")
 
@@ -387,6 +353,58 @@ defmodule SymphonyElixir.StatusDashboard do
         |> List.flatten()
         |> Enum.join("\n")
     end
+  end
+
+  defp format_dashboard_header(snapshot, codex_totals, tps, agent_count) do
+    rate_limits = Map.get(snapshot, :rate_limits)
+    project_link_lines = format_project_link_lines()
+    project_refresh_line = format_project_refresh_line(Map.get(snapshot, :polling))
+    codex_input_tokens = Map.get(codex_totals, :input_tokens, 0)
+    codex_output_tokens = Map.get(codex_totals, :output_tokens, 0)
+    codex_total_tokens = Map.get(codex_totals, :total_tokens, 0)
+    codex_seconds_running = Map.get(codex_totals, :seconds_running, 0)
+    max_agents = Config.max_concurrent_agents()
+
+    [
+      colorize("╭─ SYMPHONY STATUS", @ansi_bold),
+      colorize("│ Agents: ", @ansi_bold) <>
+        colorize("#{agent_count}", @ansi_green) <>
+        colorize("/", @ansi_gray) <>
+        colorize("#{max_agents}", @ansi_gray),
+      colorize("│ Throughput: ", @ansi_bold) <> colorize("#{format_tps(tps)} tps", @ansi_cyan),
+      colorize("│ Runtime: ", @ansi_bold) <>
+        colorize(format_runtime_seconds(codex_seconds_running), @ansi_magenta),
+      colorize("│ Tokens: ", @ansi_bold) <>
+        colorize("in #{format_count(codex_input_tokens)}", @ansi_yellow) <>
+        colorize(" | ", @ansi_gray) <>
+        colorize("out #{format_count(codex_output_tokens)}", @ansi_yellow) <>
+        colorize(" | ", @ansi_gray) <>
+        colorize("total #{format_count(codex_total_tokens)}", @ansi_yellow),
+      colorize("│ Rate Limits: ", @ansi_bold) <> format_rate_limits(rate_limits),
+      project_link_lines,
+      project_refresh_line
+    ]
+  end
+
+  defp format_running_section(running, running_event_width) do
+    header = [
+      colorize("├─ Running", @ansi_bold),
+      "│",
+      running_table_header_row(running_event_width),
+      running_table_separator_row(running_event_width)
+    ]
+
+    running_rows = format_running_rows(running, running_event_width)
+    spacer = if(running == [], do: [], else: ["│"])
+
+    header ++ running_rows ++ spacer
+  end
+
+  defp format_backoff_section(retrying) do
+    header = [colorize("├─ Backoff queue", @ansi_bold), "│"]
+    rows = format_retry_rows(retrying)
+
+    header ++ rows
   end
 
   defp format_project_link_lines do
