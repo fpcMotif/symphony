@@ -60,6 +60,7 @@ defmodule SymphonyElixir.Tracker do
     Application.get_env(:symphony_elixir, :tracker_adapter_module) ||
       case Config.tracker_kind() do
         "memory" -> SymphonyElixir.Tracker.Memory
+        "custom" -> String.to_atom("Elixir." <> Config.tracker_adapter_module())
         _ -> SymphonyElixir.Linear.Adapter
       end
   end
