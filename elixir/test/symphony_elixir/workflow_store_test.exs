@@ -153,6 +153,36 @@ defmodule SymphonyElixir.WorkflowStoreTest do
     assert {:error, {:missing_workflow_file, _, :enoent}} = WorkflowStore.force_reload()
   end
 
+  test "polls for changes automatically and fetches the latest", %{workflow_file: workflow_file} do
+    # Verify initial state
+    {:ok, workflow} = WorkflowStore.current()
+    assert workflow.prompt == "Initial Prompt"
+
+    # Modify the file, write a valid file
+    File.write!(workflow_file, """
+    ---
+    tracker:
+      kind: "linear"
+    ---
+    Another Polled Prompt
+    """)
+
+    # Wait for the next scheduled poll to read the file
+    Process.sleep(1100)
+
+    # State should be updated now without a manual current/0 force reload or manual trigger
+    # But current/0 also does a manual reload. So we fetch state directly using sys
+    %{workflow: new_workflow} = :sys.get_state(Process.whereis(WorkflowStore))
+    assert new_workflow.prompt == "Another Polled Prompt"
+  end
+
+  test "start_link/0 starts the process successfully" do
+    stop_workflow_store!()
+    Process.flag(:trap_exit, true)
+
+    assert {:ok, _pid} = WorkflowStore.start_link()
+  end
+
   test "start_link/1 fails when workflow file is missing" do
     stop_workflow_store!()
     Process.flag(:trap_exit, true)
