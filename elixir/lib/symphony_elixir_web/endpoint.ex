@@ -5,14 +5,8 @@ defmodule SymphonyElixirWeb.Endpoint do
 
   use Phoenix.Endpoint, otp_app: :symphony_elixir
 
-  @session_options [
-    store: :cookie,
-    key: "_symphony_elixir_key",
-    signing_salt: System.get_env("SESSION_SIGNING_SALT") || Base.encode64(:crypto.strong_rand_bytes(8))
-  ]
-
   socket("/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
+    websocket: [connect_info: [session: {__MODULE__, :session_options, []}]],
     longpoll: false
   )
 
@@ -27,6 +21,24 @@ defmodule SymphonyElixirWeb.Endpoint do
 
   plug(Plug.MethodOverride)
   plug(Plug.Head)
-  plug(Plug.Session, @session_options)
+
+  plug(:dynamic_session)
+
   plug(SymphonyElixirWeb.Router)
+
+  @doc false
+  def session_options do
+    [
+      store: :cookie,
+      key: "_symphony_elixir_key",
+      signing_salt:
+        System.get_env("SESSION_SIGNING_SALT") ||
+          Application.get_env(:symphony_elixir, :session_signing_salt, "8-bytes-random-default")
+    ]
+  end
+
+  defp dynamic_session(conn, _opts) do
+    opts = Plug.Session.init(session_options())
+    Plug.Session.call(conn, opts)
+  end
 end
