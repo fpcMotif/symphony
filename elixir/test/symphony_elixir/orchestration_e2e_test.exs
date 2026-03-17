@@ -1,5 +1,5 @@
 defmodule SymphonyElixir.OrchestrationE2ETest.FakeLinearClient do
-  alias SymphonyElixir.Linear.Issue
+  alias SymphonyElixir.Tracker.Issue
 
   @table :orchestration_e2e_fake_linear
 
