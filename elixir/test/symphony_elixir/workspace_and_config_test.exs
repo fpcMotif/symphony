@@ -1307,4 +1307,15 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       File.rm_rf(test_root)
     end
   end
+
+  test "linear_graphql_enabled is normalized properly from string boolean values" do
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "true")
+    assert Config.settings!().codex.linear_graphql_enabled
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "false")
+    refute Config.settings!().codex.linear_graphql_enabled
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: 1)
+    assert Config.settings!().codex.linear_graphql_enabled == true
+  end
 end
