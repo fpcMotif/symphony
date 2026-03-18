@@ -518,8 +518,12 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp handle_turn_method(
-         %{port: port, on_message: on_message, tool_executor: tool_executor, auto_approve_requests: auto_approve_requests} =
-           turn_state,
+         %{
+           port: port,
+           on_message: on_message,
+           tool_executor: tool_executor,
+           auto_approve_requests: auto_approve_requests
+         } = turn_state,
          payload,
          payload_string,
          method
