@@ -899,8 +899,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     session_option =
       Enum.find(options, fn option ->
         label = Map.get(option, "label", "")
-        normalized = label |> String.trim() |> String.downcase()
-        normalized == "approve this session"
+        label |> String.trim() |> String.downcase() == "approve this session"
       end)
 
     case session_option do
