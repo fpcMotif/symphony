@@ -3,7 +3,7 @@ defmodule SymphonyElixirWeb.Presenter do
   Shared projections for the observability API and dashboard.
   """
 
-  alias SymphonyElixir.{Config, Orchestrator, StatusDashboard}
+  alias SymphonyElixir.{Config, Orchestrator, StatusDashboard, Workspace}
 
   @spec state_payload(GenServer.name(), timeout()) :: map()
   def state_payload(orchestrator, snapshot_timeout_ms) do
@@ -31,7 +31,8 @@ defmodule SymphonyElixirWeb.Presenter do
     end
   end
 
-  @spec issue_payload(String.t(), GenServer.name(), timeout()) :: {:ok, map()} | {:error, :issue_not_found}
+  @spec issue_payload(String.t(), GenServer.name(), timeout()) ::
+          {:ok, map()} | {:error, :issue_not_found | :snapshot_timeout | :snapshot_unavailable}
   def issue_payload(issue_identifier, orchestrator, snapshot_timeout_ms) when is_binary(issue_identifier) do
     case Orchestrator.snapshot(orchestrator, snapshot_timeout_ms) do
       %{} = snapshot ->
@@ -44,8 +45,11 @@ defmodule SymphonyElixirWeb.Presenter do
           {:ok, issue_payload_body(issue_identifier, running, retry)}
         end
 
-      _ ->
-        {:error, :issue_not_found}
+      :timeout ->
+        {:error, :snapshot_timeout}
+
+      :unavailable ->
+        {:error, :snapshot_unavailable}
     end
   end
 
@@ -160,7 +164,10 @@ defmodule SymphonyElixirWeb.Presenter do
   defp workspace_path(issue_identifier, running, retry) do
     (running && Map.get(running, :workspace_path)) ||
       (retry && Map.get(retry, :workspace_path)) ||
-      Path.join(Config.settings!().workspace.root, issue_identifier)
+      case Workspace.path_for_issue(issue_identifier) do
+        {:ok, path} -> path
+        {:error, _reason} -> Path.join(Config.settings!().workspace.root, issue_identifier)
+      end
   end
 
   defp workspace_host(running, retry) do

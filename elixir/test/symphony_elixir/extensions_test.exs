@@ -387,7 +387,7 @@ defmodule SymphonyElixir.ExtensionsTest do
              "issue_id" => "issue-http",
              "status" => "running",
              "workspace" => %{
-               "path" => Path.join(Config.settings!().workspace.root, "MT-HTTP"),
+               "path" => elem(Workspace.path_for_issue("MT-HTTP"), 1),
                "host" => nil
              },
              "attempts" => %{"restart_count" => 0, "current_retry_attempt" => 0},

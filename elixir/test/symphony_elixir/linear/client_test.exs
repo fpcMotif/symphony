@@ -557,5 +557,18 @@ defmodule SymphonyElixir.Linear.ClientTest do
     test "returns {:ok, []} for empty ID list" do
       assert {:ok, []} = Client.fetch_issue_states_by_ids([])
     end
+
+    test "treats mixed GraphQL data and errors payloads as failures" do
+      graphql_fun = fn _query, _variables ->
+        {:ok,
+         %{
+           "data" => %{"issues" => %{"nodes" => [%{"id" => "issue-1"}]}},
+           "errors" => [%{"message" => "partial failure"}]
+         }}
+      end
+
+      assert {:error, {:linear_graphql_errors, [%{"message" => "partial failure"}]}} =
+               Client.fetch_issue_states_by_ids_for_test(["issue-1"], graphql_fun)
+    end
   end
 end

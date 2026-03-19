@@ -52,6 +52,24 @@ defmodule SymphonyElixir.DashboardLiveTest do
     assert html =~ "MT-HTTP"
   end
 
+  test "encodes JSON details links for reserved issue identifier characters" do
+    special_identifier = "MT/API #1 @special"
+    orchestrator_name = Module.concat(__MODULE__, :SpecialIdentifierOrchestrator)
+
+    {:ok, _pid} =
+      StaticOrchestrator.start_link(
+        name: orchestrator_name,
+        snapshot: static_snapshot(special_identifier),
+        refresh: %{queued: true, coalesced: false, requested_at: DateTime.utc_now(), operations: ["poll"]}
+      )
+
+    start_test_endpoint(orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+
+    {:ok, _view, html} = live(build_conn(), "/")
+
+    assert html =~ ~s(href="/api/v1/#{URI.encode(special_identifier, &URI.char_unreserved?/1)}")
+  end
+
   test "refreshes payload after :observability_updated pubsub broadcast" do
     orchestrator_name = Module.concat(__MODULE__, :PubSubOrchestrator)
     initial_snapshot = static_snapshot()
@@ -123,12 +141,12 @@ defmodule SymphonyElixir.DashboardLiveTest do
     start_supervised!({SymphonyElixirWeb.Endpoint, []})
   end
 
-  defp static_snapshot do
+  defp static_snapshot(identifier \\ "MT-HTTP") do
     %{
       running: [
         %{
           issue_id: "issue-http",
-          identifier: "MT-HTTP",
+          identifier: identifier,
           state: "In Progress",
           session_id: "thread-http",
           turn_count: 7,

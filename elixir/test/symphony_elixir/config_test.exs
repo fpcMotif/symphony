@@ -60,4 +60,11 @@ defmodule SymphonyElixir.ConfigTest do
 
     assert {:error, {:unsupported_tracker_kind, "jira"}} = Config.validate!()
   end
+
+  test "orchestrator_state_file expands a tilde workspace root locally" do
+    write_workflow_file!(Workflow.workflow_file_path(), workspace_root: "~/.symphony-workspaces")
+
+    assert Config.orchestrator_state_file() ==
+             Path.join(Path.expand("~/.symphony-workspaces"), ".orchestrator_state")
+  end
 end

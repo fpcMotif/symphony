@@ -70,6 +70,47 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
     assert response.body["error"]["code"] == "issue_not_found"
   end
 
+  test "returns degraded service errors when issue snapshots time out or are unavailable" do
+    timeout_name = Module.concat(__MODULE__, :IssueTimeoutOrchestrator)
+
+    start_supervised!(%{
+      id: timeout_name,
+      start: {StaticOrchestrator, :start_link, [[name: timeout_name, snapshot: :timeout]]}
+    })
+
+    timeout_port = start_test_endpoint(timeout_name)
+    timeout_response = Req.get!("http://127.0.0.1:#{timeout_port}/api/v1/MT-HTTP")
+    assert timeout_response.status == 504
+    assert timeout_response.body["error"]["code"] == "snapshot_timeout"
+
+    unavailable_name = Module.concat(__MODULE__, :IssueUnavailableOrchestrator)
+
+    start_supervised!(%{
+      id: unavailable_name,
+      start: {StaticOrchestrator, :start_link, [[name: unavailable_name, snapshot: :unavailable]]}
+    })
+
+    unavailable_port = start_test_endpoint(unavailable_name)
+    unavailable_response = Req.get!("http://127.0.0.1:#{unavailable_port}/api/v1/MT-HTTP")
+    assert unavailable_response.status == 503
+    assert unavailable_response.body["error"]["code"] == "snapshot_unavailable"
+  end
+
+  test "serves issue identifiers with reserved URL characters when encoded" do
+    special_identifier = "MT/API #1 @special"
+    orchestrator_name = Module.concat(__MODULE__, :SpecialIssueOrchestrator)
+
+    start_supervised!({StaticOrchestrator, name: orchestrator_name, snapshot: snapshot_fixture(special_identifier)})
+
+    port = start_test_endpoint(orchestrator_name)
+
+    response =
+      Req.get!("http://127.0.0.1:#{port}/api/v1/#{URI.encode(special_identifier, &URI.char_unreserved?/1)}")
+
+    assert response.status == 200
+    assert response.body["issue_identifier"] == special_identifier
+  end
+
   test "returns orchestrator_unavailable when refresh cannot be queued" do
     orchestrator_name = Module.concat(__MODULE__, :RefreshUnavailableOrchestrator)
 
@@ -116,7 +157,12 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
     endpoint_config =
       :symphony_elixir
       |> Application.get_env(SymphonyElixirWeb.Endpoint, [])
-      |> Keyword.merge(server: false, secret_key_base: String.duplicate("s", 64), orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+      |> Keyword.merge(
+        server: false,
+        secret_key_base: String.duplicate("s", 64),
+        orchestrator: orchestrator_name,
+        snapshot_timeout_ms: 50
+      )
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
 
@@ -172,12 +218,12 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
     assert response.body["error"]["code"] == "method_not_allowed"
   end
 
-  defp snapshot_fixture do
+  defp snapshot_fixture(identifier \\ "MT-HTTP") do
     %{
       running: [
         %{
           issue_id: "issue-http",
-          identifier: "MT-HTTP",
+          identifier: identifier,
           state: "In Progress",
           session_id: "thread-http",
           turn_count: 7,

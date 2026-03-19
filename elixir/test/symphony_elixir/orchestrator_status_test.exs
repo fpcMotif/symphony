@@ -21,6 +21,35 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
     send(pid, :stop)
   end
 
+  test "snapshot accepts a pid server reference" do
+    orchestrator_name = Module.concat(__MODULE__, :PidSnapshotOrchestrator)
+    {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    assert %{} = Orchestrator.snapshot(pid, 50)
+  end
+
+  test "request_refresh accepts a :via server reference" do
+    registry_name = Module.concat(__MODULE__, :ViaRegistry)
+    start_supervised!({Registry, keys: :unique, name: registry_name})
+
+    via_name = {:via, Registry, {registry_name, :orchestrator}}
+    {:ok, pid} = Orchestrator.start_link(name: via_name)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :normal)
+      end
+    end)
+
+    assert %{queued: true} = Orchestrator.request_refresh(via_name)
+  end
+
   test "orchestrator snapshot reflects last codex update and session id" do
     issue_id = "issue-snapshot"
 

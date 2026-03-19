@@ -53,7 +53,24 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     assert {:ok, second_workspace} = Workspace.create_for_issue("MT/Det")
 
     assert first_workspace == second_workspace
-    assert Path.basename(first_workspace) == "MT_Det"
+    assert Path.basename(first_workspace) =~ ~r/^MT_Det--[0-9a-f]{8}$/
+  end
+
+  test "workspace paths do not collide across distinct issue identifiers" do
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-collision-#{System.unique_integer([:positive])}"
+      )
+
+    write_workflow_file!(Workflow.workflow_file_path(), workspace_root: workspace_root)
+
+    assert {:ok, slash_workspace} = Workspace.create_for_issue("MT/1")
+    assert {:ok, underscore_workspace} = Workspace.create_for_issue("MT_1")
+
+    refute slash_workspace == underscore_workspace
+    assert Path.basename(underscore_workspace) == "MT_1"
+    assert Path.basename(slash_workspace) =~ ~r/^MT_1--[0-9a-f]{8}$/
   end
 
   test "workspace reuses existing issue directory without deleting local changes" do
@@ -165,6 +182,31 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert {:ok, workspace} = Workspace.create_for_issue("MT-LINK")
       assert workspace == canonical_workspace
       assert File.dir?(workspace)
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "workspace rejects symlink loops under the configured root" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-workspace-symlink-loop-#{System.unique_integer([:positive])}"
+      )
+
+    try do
+      workspace_root = Path.join(test_root, "workspaces")
+      loop_a = Path.join(workspace_root, "loop-a")
+      loop_b = Path.join(workspace_root, "loop-b")
+
+      File.mkdir_p!(workspace_root)
+      File.ln_s!(loop_b, loop_a)
+      File.ln_s!(loop_a, loop_b)
+
+      write_workflow_file!(Workflow.workflow_file_path(), workspace_root: workspace_root)
+
+      assert {:error, {:path_canonicalize_failed, _path, :symlink_loop}} =
+               SymphonyElixir.PathSafety.canonicalize(Path.join(loop_a, "MT-LOOP"))
     after
       File.rm_rf(test_root)
     end
@@ -835,7 +877,16 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
     write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: false)
     refute Config.settings!().codex.linear_graphql_enabled
 
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "true")
+    assert Config.settings!().codex.linear_graphql_enabled
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "false")
+    refute Config.settings!().codex.linear_graphql_enabled
+
     write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: "bad")
+    assert Config.settings!().codex.linear_graphql_enabled
+
+    write_workflow_file!(Workflow.workflow_file_path(), codex_linear_graphql_enabled: 123)
     assert Config.settings!().codex.linear_graphql_enabled
 
     write_workflow_file!(Workflow.workflow_file_path(),
@@ -1303,6 +1354,122 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
       assert trace =~ "echo before-remove"
       assert trace =~ "rm -rf"
       assert trace =~ workspace_path
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "remote workspace creation rejects resolved paths outside the configured root" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-workspace-outside-root-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous_remote_home = System.get_env("SYMP_TEST_REMOTE_HOME")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      restore_env("SYMP_TEST_REMOTE_HOME", previous_remote_home)
+    end)
+
+    try do
+      trace_file = Path.join(test_root, "ssh.trace")
+      fake_ssh = Path.join(test_root, "ssh")
+      remote_home = Path.join(test_root, "remote-home")
+      workspace_root = Path.join(test_root, "remote-workspaces")
+      workspace_path = Path.join(workspace_root, "MT-SSH-WS")
+      escaped_root = Path.join(test_root, "escaped-root")
+
+      File.mkdir_p!(test_root)
+      File.mkdir_p!(workspace_root)
+      File.mkdir_p!(escaped_root)
+      File.ln_s!(escaped_root, workspace_path)
+      System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("SYMP_TEST_REMOTE_HOME", remote_home)
+      System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+      File.write!(fake_ssh, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      last_arg=''
+      for arg in "$@"; do
+        last_arg="$arg"
+      done
+      HOME="${SYMP_TEST_REMOTE_HOME}" /bin/sh -lc "$last_arg"
+      """)
+
+      File.chmod!(fake_ssh, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        worker_ssh_hosts: ["worker-01:2200"]
+      )
+
+      assert {:error, {:workspace_prepare_failed, "worker-01:2200", 19, _output}} =
+               Workspace.create_for_issue("MT-SSH-WS", "worker-01:2200")
+    after
+      File.rm_rf(test_root)
+    end
+  end
+
+  test "remote workspace removal rejects paths outside the configured root" do
+    test_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-remote-remove-outside-root-#{System.unique_integer([:positive])}"
+      )
+
+    previous_path = System.get_env("PATH")
+    previous_trace = System.get_env("SYMP_TEST_SSH_TRACE")
+    previous_remote_home = System.get_env("SYMP_TEST_REMOTE_HOME")
+
+    on_exit(fn ->
+      restore_env("PATH", previous_path)
+      restore_env("SYMP_TEST_SSH_TRACE", previous_trace)
+      restore_env("SYMP_TEST_REMOTE_HOME", previous_remote_home)
+    end)
+
+    try do
+      trace_file = Path.join(test_root, "ssh.trace")
+      fake_ssh = Path.join(test_root, "ssh")
+      remote_home = Path.join(test_root, "remote-home")
+      workspace_root = Path.join(test_root, "remote-workspaces")
+      workspace_path = Path.join(workspace_root, "MT-SSH-WS")
+      escaped_root = Path.join(test_root, "escaped-root")
+
+      File.mkdir_p!(test_root)
+      File.mkdir_p!(workspace_root)
+      File.mkdir_p!(escaped_root)
+      File.ln_s!(escaped_root, workspace_path)
+      System.put_env("SYMP_TEST_SSH_TRACE", trace_file)
+      System.put_env("SYMP_TEST_REMOTE_HOME", remote_home)
+      System.put_env("PATH", test_root <> ":" <> (previous_path || ""))
+
+      File.write!(fake_ssh, """
+      #!/bin/sh
+      trace_file="${SYMP_TEST_SSH_TRACE:-/tmp/symphony-fake-ssh.trace}"
+      printf 'ARGV:%s\\n' "$*" >> "$trace_file"
+      last_arg=''
+      for arg in "$@"; do
+        last_arg="$arg"
+      done
+      HOME="${SYMP_TEST_REMOTE_HOME}" /bin/sh -lc "$last_arg"
+      """)
+
+      File.chmod!(fake_ssh, 0o755)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        workspace_root: workspace_root,
+        worker_ssh_hosts: ["worker-01:2200"]
+      )
+
+      assert {:error, {:workspace_remove_failed, "worker-01:2200", 19, _output}, ""} =
+               Workspace.remove(workspace_path, "worker-01:2200")
     after
       File.rm_rf(test_root)
     end

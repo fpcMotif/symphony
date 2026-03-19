@@ -402,6 +402,10 @@ defmodule SymphonyElixir.Linear.Client do
     )
   end
 
+  defp decode_linear_response(%{"data" => _data, "errors" => errors}, _assignee_filter) do
+    {:error, {:linear_graphql_errors, errors}}
+  end
+
   defp decode_linear_response(%{"data" => %{"issues" => %{"nodes" => nodes}}}, assignee_filter) do
     issues =
       nodes
@@ -417,6 +421,16 @@ defmodule SymphonyElixir.Linear.Client do
 
   defp decode_linear_response(_unknown, _assignee_filter) do
     {:error, :linear_unknown_payload}
+  end
+
+  defp decode_linear_page_response(
+         %{
+           "data" => _data,
+           "errors" => errors
+         },
+         _assignee_filter
+       ) do
+    {:error, {:linear_graphql_errors, errors}}
   end
 
   defp decode_linear_page_response(

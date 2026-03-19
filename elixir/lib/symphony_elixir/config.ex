@@ -90,7 +90,9 @@ defmodule SymphonyElixir.Config do
   """
   @spec orchestrator_state_file() :: Path.t()
   def orchestrator_state_file do
-    Path.join(settings!().workspace.root, @default_orchestrator_state)
+    settings!().workspace.root
+    |> Path.expand()
+    |> Path.join(@default_orchestrator_state)
   end
 
   @spec server_port() :: non_neg_integer() | nil
@@ -125,24 +127,32 @@ defmodule SymphonyElixir.Config do
   end
 
   defp validate_semantics(settings) do
-    cond do
-      is_nil(settings.tracker.kind) ->
+    case settings.tracker.kind do
+      nil ->
         {:error, :missing_tracker_kind}
 
-      settings.tracker.kind not in ["linear", "memory", "custom"] ->
-        {:error, {:unsupported_tracker_kind, settings.tracker.kind}}
+      kind when kind not in ["linear", "memory", "custom"] ->
+        {:error, {:unsupported_tracker_kind, kind}}
 
-      settings.tracker.kind == "custom" and not is_binary(settings.tracker.adapter_module) ->
-        {:error, :missing_tracker_adapter_module}
+      "custom" ->
+        validate_custom_tracker(settings.tracker)
 
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.api_key) ->
-        {:error, :missing_linear_api_token}
+      "linear" ->
+        validate_linear_tracker(settings.tracker)
 
-      settings.tracker.kind == "linear" and not is_binary(settings.tracker.project_slug) ->
-        {:error, :missing_linear_project_slug}
-
-      true ->
+      _other ->
         :ok
+    end
+  end
+
+  defp validate_custom_tracker(%{adapter_module: adapter_module}) when is_binary(adapter_module), do: :ok
+  defp validate_custom_tracker(_tracker), do: {:error, :missing_tracker_adapter_module}
+
+  defp validate_linear_tracker(%{api_key: api_key, project_slug: project_slug}) do
+    cond do
+      not is_binary(api_key) -> {:error, :missing_linear_api_token}
+      not is_binary(project_slug) -> {:error, :missing_linear_project_slug}
+      true -> :ok
     end
   end
 

@@ -109,7 +109,7 @@ defmodule SymphonyElixirWeb.PresenterTest do
              issue_identifier: "MT-123",
              issue_id: "issue-running",
              status: "running",
-             workspace: %{path: Path.join(Config.settings!().workspace.root, "MT-123"), host: nil},
+             workspace: %{path: workspace_path_for("MT-123"), host: nil},
              attempts: %{restart_count: 0, current_retry_attempt: 0},
              running: %{
                worker_host: nil,
@@ -147,7 +147,7 @@ defmodule SymphonyElixirWeb.PresenterTest do
              issue_identifier: "MT-999",
              issue_id: "issue-retry",
              status: "retrying",
-             workspace: %{path: Path.join(Config.settings!().workspace.root, "MT-999"), host: nil},
+             workspace: %{path: workspace_path_for("MT-999"), host: nil},
              attempts: %{restart_count: 1, current_retry_attempt: 2},
              running: nil,
              retry: %{
@@ -171,6 +171,20 @@ defmodule SymphonyElixirWeb.PresenterTest do
     {:ok, _pid} = StaticOrchestrator.start_link(name: orchestrator_name, snapshot: snapshot_fixture())
 
     assert {:error, :issue_not_found} = Presenter.issue_payload("MT-MISSING", orchestrator_name, 50)
+  end
+
+  test "issue_payload/3 returns timeout error when snapshot times out" do
+    orchestrator_name = Module.concat(__MODULE__, :IssueTimeoutOrchestrator)
+    {:ok, _pid} = StaticOrchestrator.start_link(name: orchestrator_name, snapshot: :timeout)
+
+    assert {:error, :snapshot_timeout} = Presenter.issue_payload("MT-123", orchestrator_name, 50)
+  end
+
+  test "issue_payload/3 returns unavailable error when snapshot is unavailable" do
+    orchestrator_name = Module.concat(__MODULE__, :IssueUnavailableOrchestrator)
+    {:ok, _pid} = StaticOrchestrator.start_link(name: orchestrator_name, snapshot: :unavailable)
+
+    assert {:error, :snapshot_unavailable} = Presenter.issue_payload("MT-123", orchestrator_name, 50)
   end
 
   test "refresh_payload/1 returns exact response and second-precision requested_at" do
@@ -227,6 +241,11 @@ defmodule SymphonyElixirWeb.PresenterTest do
 
   defp running_message_fixture do
     %{event: :session_started, message: %{"payload" => %{"session_id" => "thread-running"}}}
+  end
+
+  defp workspace_path_for(issue_identifier) do
+    assert {:ok, workspace_path} = Workspace.path_for_issue(issue_identifier)
+    workspace_path
   end
 
   defp assert_iso8601_second_precision(value) do

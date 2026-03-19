@@ -49,7 +49,7 @@ defmodule SymphonyElixir.OrchestrationE2ETest.FakeLinearClient do
     issues_by_id = :ets.lookup_element(@table, :issues_by_id, 2)
     issue_state_call_counts = :ets.lookup_element(@table, :issue_state_call_counts, 2)
 
-    {issues, updated_call_counts} =
+    {results, updated_call_counts} =
       Enum.map_reduce(issue_ids, issue_state_call_counts, fn issue_id, call_counts ->
         issue_response = Map.get(issues_by_id, issue_id)
         issue = next_issue_state_response(issue_id, issue_response, call_counts)
@@ -57,10 +57,17 @@ defmodule SymphonyElixir.OrchestrationE2ETest.FakeLinearClient do
       end)
 
     :ets.insert(@table, {:issue_state_call_counts, updated_call_counts})
-    issues = Enum.reject(issues, &is_nil/1)
 
-    send_event({:fake_linear_fetch_issue_states_by_ids, issue_ids, issues})
-    {:ok, issues}
+    case Enum.find(results, &match?({:error, _reason}, &1)) do
+      {:error, reason} = error ->
+        send_event({:fake_linear_fetch_issue_states_by_ids, issue_ids, error})
+        {:error, reason}
+
+      nil ->
+        issues = Enum.reject(results, &is_nil/1)
+        send_event({:fake_linear_fetch_issue_states_by_ids, issue_ids, issues})
+        {:ok, issues}
+    end
   end
 
   def fetch_issues_by_states(state_names) do
@@ -92,10 +99,15 @@ defmodule SymphonyElixir.OrchestrationE2ETest.FakeLinearClient do
   end
 
   defp normalize_issue_response(issues) when is_list(issues) do
-    Enum.map(issues, &normalize_issue/1)
+    Enum.map(issues, &normalize_issue_result/1)
   end
 
+  defp normalize_issue_response({:error, _reason} = error), do: error
   defp normalize_issue_response(issue), do: normalize_issue(issue)
+
+  defp normalize_issue_result({:error, _reason} = error), do: error
+  defp normalize_issue_result(nil), do: nil
+  defp normalize_issue_result(issue), do: normalize_issue(issue)
 
   defp next_issue_state_response(issue_id, issues, call_counts) when is_list(issues) do
     call_count = Map.get(call_counts, issue_id, 0)
@@ -130,7 +142,7 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
     :ok
   end
 
-  test "happy path orchestrates a full cycle and leaves an isolated workspace" do
+  test "happy path orchestrates a full cycle and cleans up the terminal workspace" do
     issue = issue_fixture("issue-happy", "MT-E2E-1", "In Progress")
     %{test_root: test_root, workspace_root: workspace_root, codex_binary: codex_binary} = setup_runtime_paths()
 
@@ -177,8 +189,8 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         snapshot != :timeout and snapshot.retrying == [] and snapshot.running == []
       end)
 
-      assert FakeLinearClient.candidate_call_count() >= 2
-      assert File.exists?(Path.join(workspace, ".agent-result"))
+      assert FakeLinearClient.candidate_call_count() >= 1
+      refute File.exists?(workspace)
     after
       File.rm_rf(test_root)
     end
@@ -195,10 +207,9 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         recipient: self(),
         candidate_responses: [
           {:ok, [issue]},
-          {:error, :temporary_unavailable},
           {:ok, []}
         ],
-        issues_by_id: %{issue.id => [issue, issue, %{issue | state: "Done"}]},
+        issues_by_id: %{issue.id => [issue, issue, {:error, :temporary_unavailable}, issue, %{issue | state: "Done"}]},
         terminal_issues: []
       )
 
@@ -231,15 +242,6 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         snapshot != :timeout and snapshot.retrying != []
       end)
 
-      first_retry_token =
-        :sys.get_state(pid)
-        |> Map.fetch!(:retry_attempts)
-        |> get_in([issue.id, :retry_token])
-
-      assert is_reference(first_retry_token)
-
-      send(pid, {:retry_issue, issue.id, first_retry_token})
-
       assert_eventually(fn ->
         snapshot = Orchestrator.snapshot(orchestrator_name, 1_000)
 
@@ -262,7 +264,7 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         snapshot.retrying == [] and snapshot.running == []
       end)
 
-      assert FakeLinearClient.candidate_call_count() == 3
+      assert FakeLinearClient.candidate_call_count() == 1
     after
       File.rm_rf(test_root)
     end

@@ -120,6 +120,42 @@ defmodule SymphonyElixir.TrackerContractTest do
 
       assert {:error, {:invalid_adapter_response, :create_comment}} = Tracker.create_comment("issue-1", "body")
     end
+
+    test "returns a typed error when the configured custom adapter module is missing" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "custom",
+        tracker_adapter_module: "SymphonyElixir.DoesNotExistAdapter"
+      )
+
+      assert {:error, {:tracker_adapter_not_loaded, "SymphonyElixir.DoesNotExistAdapter"}} =
+               Tracker.fetch_candidate_issues()
+    end
+
+    test "adapter/0 raises when the configured custom adapter module is invalid" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "custom",
+        tracker_adapter_module: "SymphonyElixir.DoesNotExistAdapter"
+      )
+
+      assert_raise ArgumentError, ~r/Invalid tracker adapter/, fn ->
+        Tracker.adapter()
+      end
+    end
+
+    test "returns a typed error when the configured custom adapter module is blank" do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "custom",
+        tracker_adapter_module: "   "
+      )
+
+      assert {:error, :missing_tracker_adapter_module} = Tracker.fetch_candidate_issues()
+    end
+
+    test "returns a typed error when the configured custom adapter module is omitted" do
+      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: nil)
+
+      assert {:error, :missing_tracker_adapter_module} = Tracker.fetch_candidate_issues()
+    end
   end
 
   describe "linear adapter contract" do
@@ -196,6 +232,14 @@ defmodule SymphonyElixir.TrackerContractTest do
 
       assert {:error, {:invalid_adapter_response, :update_issue_state}} =
                Tracker.update_issue_state("issue-1", "Done")
+    end
+
+    test "returns a typed error when the adapter override is not a module" do
+      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "linear")
+      Application.put_env(:symphony_elixir, :tracker_adapter_module, "not-a-module")
+
+      assert {:error, {:invalid_tracker_adapter_override, "not-a-module"}} =
+               Tracker.fetch_candidate_issues()
     end
   end
 end

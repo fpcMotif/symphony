@@ -14,7 +14,15 @@ defmodule SymphonyElixir.CoreTest do
     config = Config.settings!()
     assert config.polling.interval_ms == 30_000
     assert config.tracker.active_states == ["Todo", "In Progress"]
-    assert config.tracker.terminal_states == ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]
+
+    assert config.tracker.terminal_states == [
+             "Closed",
+             "Cancelled",
+             "Canceled",
+             "Duplicate",
+             "Done"
+           ]
+
     assert config.tracker.assignee == nil
     assert config.agent.max_turns == 20
 
@@ -64,7 +72,10 @@ defmodule SymphonyElixir.CoreTest do
     write_workflow_file!(Workflow.workflow_file_path(), codex_command: "/bin/sh app-server")
     assert :ok = Config.validate!()
 
-    write_workflow_file!(Workflow.workflow_file_path(), codex_approval_policy: "definitely-not-valid")
+    write_workflow_file!(Workflow.workflow_file_path(),
+      codex_approval_policy: "definitely-not-valid"
+    )
+
     assert :ok = Config.validate!()
 
     write_workflow_file!(Workflow.workflow_file_path(), codex_thread_sandbox: "unsafe-ish")
@@ -105,10 +116,15 @@ defmodule SymphonyElixir.CoreTest do
 
     hooks = Map.get(config, "hooks", %{})
     assert is_map(hooks)
-    assert Map.get(hooks, "after_create") =~ "git clone --depth 1 https://github.com/openai/symphony ."
+
+    assert Map.get(hooks, "after_create") =~
+             "git clone --depth 1 https://github.com/openai/symphony ."
+
     assert Map.get(hooks, "after_create") =~ "cd elixir && mise trust"
     assert Map.get(hooks, "after_create") =~ "mise exec -- mix deps.get"
-    assert Map.get(hooks, "before_remove") =~ "cd elixir && mise exec -- mix workspace.before_remove"
+
+    assert Map.get(hooks, "before_remove") =~
+             "cd elixir && mise exec -- mix workspace.before_remove"
 
     assert String.trim(prompt) != ""
     assert is_binary(Config.workflow_prompt())
@@ -174,7 +190,9 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "workflow load accepts prompt-only files without front matter" do
-    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "PROMPT_ONLY_WORKFLOW.md")
+    workflow_path =
+      Path.join(Path.dirname(Workflow.workflow_file_path()), "PROMPT_ONLY_WORKFLOW.md")
+
     File.write!(workflow_path, "Prompt only\n")
 
     assert {:ok, %{config: %{}, prompt: "Prompt only", prompt_template: "Prompt only"}} =
@@ -182,7 +200,9 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "workflow load accepts unterminated front matter with an empty prompt" do
-    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "UNTERMINATED_WORKFLOW.md")
+    workflow_path =
+      Path.join(Path.dirname(Workflow.workflow_file_path()), "UNTERMINATED_WORKFLOW.md")
+
     File.write!(workflow_path, "---\ntracker:\n  kind: linear\n")
 
     assert {:ok, %{config: %{"tracker" => %{"kind" => "linear"}}, prompt: "", prompt_template: ""}} =
@@ -190,7 +210,9 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "workflow load rejects non-map front matter" do
-    workflow_path = Path.join(Path.dirname(Workflow.workflow_file_path()), "INVALID_FRONT_MATTER_WORKFLOW.md")
+    workflow_path =
+      Path.join(Path.dirname(Workflow.workflow_file_path()), "INVALID_FRONT_MATTER_WORKFLOW.md")
+
     File.write!(workflow_path, "---\n- not-a-map\n---\nPrompt body\n")
 
     assert {:error, :workflow_front_matter_not_a_map} = Workflow.load(workflow_path)
@@ -211,7 +233,8 @@ defmodule SymphonyElixir.CoreTest do
     end)
 
     if is_pid(orchestrator_pid) do
-      assert :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.Orchestrator)
+      assert :ok =
+               Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.Orchestrator)
     end
 
     assert {:ok, pid} = SymphonyElixir.start_link()
@@ -578,6 +601,8 @@ defmodule SymphonyElixir.CoreTest do
       pid: self(),
       ref: ref,
       identifier: "MT-558",
+      worker_host: "worker-a",
+      workspace_path: "/remote/workspaces/MT-558",
       issue: %Issue{id: issue_id, identifier: "MT-558", state: "In Progress"},
       started_at: DateTime.utc_now()
     }
@@ -595,9 +620,20 @@ defmodule SymphonyElixir.CoreTest do
 
     refute Map.has_key?(state.running, issue_id)
     assert MapSet.member?(state.completed, issue_id)
-    assert %{attempt: 1, due_at_ms: due_at_ms} = state.retry_attempts[issue_id]
+
+    assert %{
+             attempt: 1,
+             due_at_ms: due_at_ms,
+             delay_type: :continuation,
+             worker_host: "worker-a",
+             workspace_path: "/remote/workspaces/MT-558"
+           } = state.retry_attempts[issue_id]
+
     assert is_integer(due_at_ms)
-    assert_due_in_range(due_at_ms, 250, 1_100)
+
+    remaining_ms = due_at_ms - System.monotonic_time(:millisecond)
+    assert remaining_ms <= 1_100
+    assert remaining_ms >= -1_000
   end
 
   test "abnormal worker exit increments retry attempt progressively" do
@@ -759,7 +795,12 @@ defmodule SymphonyElixir.CoreTest do
               error: "agent exited: :boom"
             }
           },
-          "codex_totals" => %{input_tokens: 0, output_tokens: 0, total_tokens: 0, seconds_running: 0},
+          "codex_totals" => %{
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            seconds_running: 0
+          },
           "codex_rate_limits" => nil
         })
       )
@@ -798,6 +839,145 @@ defmodule SymphonyElixir.CoreTest do
     end
   end
 
+  test "restored running entries become continuation retries with preserved remote metadata" do
+    issue_id = "issue-restored-running"
+
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-restored-running-#{System.unique_integer([:positive])}"
+      )
+
+    previous_skip_persistence = Application.get_env(:symphony_elixir, :skip_persistence)
+    previous_memory_issues = Application.get_env(:symphony_elixir, :memory_tracker_issues)
+
+    try do
+      File.mkdir_p!(workspace_root)
+
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root,
+        poll_interval_ms: 60_000
+      )
+
+      Application.put_env(:symphony_elixir, :skip_persistence, false)
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+
+      File.write!(
+        Config.orchestrator_state_file(),
+        :erlang.term_to_binary(%{
+          "running" => %{
+            issue_id => %{
+              identifier: "MT-REMOTE",
+              retry_attempt: 1,
+              worker_host: "worker-a",
+              workspace_path: "/remote/workspaces/MT-REMOTE",
+              session_id: "thread-remote-turn-1"
+            }
+          },
+          "retry_attempts" => %{},
+          "codex_totals" => %{
+            input_tokens: 0,
+            output_tokens: 0,
+            total_tokens: 0,
+            seconds_running: 0
+          },
+          "codex_rate_limits" => nil
+        })
+      )
+
+      orchestrator_name = Module.concat(__MODULE__, :RestoredRunningOrchestrator)
+      {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+      on_exit(fn ->
+        restore_app_env(:skip_persistence, previous_skip_persistence)
+        restore_app_env(:memory_tracker_issues, previous_memory_issues)
+
+        if Process.alive?(pid) do
+          Process.exit(pid, :normal)
+        end
+      end)
+
+      assert %{
+               attempt: 1,
+               delay_type: :continuation,
+               worker_host: "worker-a",
+               workspace_path: "/remote/workspaces/MT-REMOTE",
+               session_id: "thread-remote-turn-1",
+               identifier: "MT-REMOTE"
+             } = :sys.get_state(pid).retry_attempts[issue_id]
+    after
+      restore_app_env(:skip_persistence, previous_skip_persistence)
+      restore_app_env(:memory_tracker_issues, previous_memory_issues)
+      File.rm_rf(workspace_root)
+    end
+  end
+
+  test "missing continuation retries clean up the workspace before releasing the claim" do
+    issue_id = "issue-missing-continuation"
+
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-elixir-missing-continuation-#{System.unique_integer([:positive])}"
+      )
+
+    previous_memory_issues = Application.get_env(:symphony_elixir, :memory_tracker_issues)
+
+    try do
+      write_workflow_file!(Workflow.workflow_file_path(),
+        tracker_kind: "memory",
+        workspace_root: workspace_root,
+        poll_interval_ms: 60_000
+      )
+
+      Application.put_env(:symphony_elixir, :memory_tracker_issues, [])
+
+      assert {:ok, workspace} = Workspace.create_for_issue("MT-MISSING")
+      assert File.dir?(workspace)
+
+      orchestrator_name = Module.concat(__MODULE__, :MissingContinuationOrchestrator)
+      {:ok, pid} = Orchestrator.start_link(name: orchestrator_name)
+
+      on_exit(fn ->
+        restore_app_env(:memory_tracker_issues, previous_memory_issues)
+
+        if Process.alive?(pid) do
+          Process.exit(pid, :normal)
+        end
+      end)
+
+      retry_token = make_ref()
+      initial_state = :sys.get_state(pid)
+
+      :sys.replace_state(pid, fn _ ->
+        initial_state
+        |> Map.put(:claimed, MapSet.new([issue_id]))
+        |> Map.put(:retry_attempts, %{
+          issue_id => %{
+            attempt: 1,
+            timer_ref: nil,
+            retry_token: retry_token,
+            due_at_ms: System.monotonic_time(:millisecond),
+            identifier: "MT-MISSING",
+            delay_type: :continuation,
+            workspace_path: workspace
+          }
+        })
+      end)
+
+      send(pid, {:retry_issue, issue_id, retry_token})
+      Process.sleep(50)
+
+      refute File.exists?(workspace)
+      refute MapSet.member?(:sys.get_state(pid).claimed, issue_id)
+      refute Map.has_key?(:sys.get_state(pid).retry_attempts, issue_id)
+    after
+      restore_app_env(:memory_tracker_issues, previous_memory_issues)
+      File.rm_rf(workspace_root)
+    end
+  end
+
   test "manual refresh coalesces repeated requests and ignores superseded ticks" do
     now_ms = System.monotonic_time(:millisecond)
     stale_tick_token = make_ref()
@@ -825,7 +1005,9 @@ defmodule SymphonyElixir.CoreTest do
              Orchestrator.handle_call(:request_refresh, {self(), make_ref()}, refreshed_state)
 
     assert coalesced_state.tick_token == refreshed_state.tick_token
-    assert {:noreply, ^coalesced_state} = Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
+
+    assert {:noreply, ^coalesced_state} =
+             Orchestrator.handle_info({:tick, stale_tick_token}, coalesced_state)
   end
 
   test "select_worker_host_for_test skips full ssh hosts under the shared per-host cap" do
@@ -925,7 +1107,8 @@ defmodule SymphonyElixir.CoreTest do
   end
 
   test "prompt builder renders issue datetime fields without crashing" do
-    workflow_prompt = "Ticket {{ issue.identifier }} created={{ issue.created_at }} updated={{ issue.updated_at }}"
+    workflow_prompt =
+      "Ticket {{ issue.identifier }} created={{ issue.created_at }} updated={{ issue.updated_at }}"
 
     write_workflow_file!(Workflow.workflow_file_path(), prompt: workflow_prompt)
 
@@ -1062,7 +1245,8 @@ defmodule SymphonyElixir.CoreTest do
       end
     end)
 
-    assert :ok = Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
+    assert :ok =
+             Supervisor.terminate_child(SymphonyElixir.Supervisor, SymphonyElixir.WorkflowStore)
 
     Workflow.set_workflow_file_path(Path.join(System.tmp_dir!(), "missing-workflow-#{System.unique_integer([:positive])}.md"))
 
@@ -2112,7 +2296,12 @@ defmodule SymphonyElixir.CoreTest do
   # ---------------------------------------------------------------------------
 
   test "startup terminal cleanup removes workspaces for issues in terminal states" do
-    workspace_root = Path.join(System.tmp_dir!(), "symphony-terminal-cleanup-#{System.unique_integer([:positive])}")
+    workspace_root =
+      Path.join(
+        System.tmp_dir!(),
+        "symphony-terminal-cleanup-#{System.unique_integer([:positive])}"
+      )
+
     File.mkdir_p!(workspace_root)
 
     write_workflow_file!(Workflow.workflow_file_path(),
@@ -2156,9 +2345,30 @@ defmodule SymphonyElixir.CoreTest do
     now = DateTime.utc_now()
 
     issues = [
-      %Issue{id: "d", identifier: "MT-D", state: "Todo", title: "D", priority: nil, created_at: now},
-      %Issue{id: "a", identifier: "MT-A", state: "Todo", title: "A", priority: 1, created_at: DateTime.add(now, 10, :second)},
-      %Issue{id: "b", identifier: "MT-B", state: "Todo", title: "B", priority: 1, created_at: now},
+      %Issue{
+        id: "d",
+        identifier: "MT-D",
+        state: "Todo",
+        title: "D",
+        priority: nil,
+        created_at: now
+      },
+      %Issue{
+        id: "a",
+        identifier: "MT-A",
+        state: "Todo",
+        title: "A",
+        priority: 1,
+        created_at: DateTime.add(now, 10, :second)
+      },
+      %Issue{
+        id: "b",
+        identifier: "MT-B",
+        state: "Todo",
+        title: "B",
+        priority: 1,
+        created_at: now
+      },
       %Issue{id: "c", identifier: "MT-C", state: "Todo", title: "C", priority: 3, created_at: now}
     ]
 

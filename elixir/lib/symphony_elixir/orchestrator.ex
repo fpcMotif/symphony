@@ -225,6 +225,7 @@ defmodule SymphonyElixir.Orchestrator do
           |> apply_codex_rate_limits(update)
 
         notify_dashboard()
+
         {:noreply, save_state(%{state | running: Map.put(running, issue_id, updated_running_entry)})}
     end
   end
@@ -361,8 +362,13 @@ defmodule SymphonyElixir.Orchestrator do
   @doc false
   @spec should_dispatch_issue_for_test(Issue.t(), term()) :: boolean()
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
-    active_states = if MapSet.size(state.active_states) > 0, do: state.active_states, else: active_state_set()
-    terminal_states = if MapSet.size(state.terminal_states) > 0, do: state.terminal_states, else: terminal_state_set()
+    active_states =
+      if MapSet.size(state.active_states) > 0, do: state.active_states, else: active_state_set()
+
+    terminal_states =
+      if MapSet.size(state.terminal_states) > 0,
+        do: state.terminal_states,
+        else: terminal_state_set()
 
     running_counts =
       Enum.reduce(state.running, %{}, fn
@@ -404,7 +410,8 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   @doc false
-  @spec select_worker_host_for_test(term(), String.t() | nil) :: String.t() | nil | :no_worker_capacity
+  @spec select_worker_host_for_test(term(), String.t() | nil) ::
+          String.t() | nil | :no_worker_capacity
   def select_worker_host_for_test(%State{} = state, preferred_worker_host) do
     select_worker_host(state, preferred_worker_host)
   end
@@ -640,7 +647,13 @@ defmodule SymphonyElixir.Orchestrator do
       |> Enum.reduce({[], state, running_counts}, fn issue, {candidates, state_acc, counts_acc} ->
         if should_dispatch_issue?(issue, state_acc, counts_acc, active_states, terminal_states) do
           temp_running = Map.put(state_acc.running, issue.id, %{issue: issue})
-          temp_state = %{state_acc | running: temp_running, claimed: MapSet.put(state_acc.claimed, issue.id)}
+
+          temp_state = %{
+            state_acc
+            | running: temp_running,
+              claimed: MapSet.put(state_acc.claimed, issue.id)
+          }
+
           temp_counts = Map.update(counts_acc, normalize_issue_state(issue.state), 1, &(&1 + 1))
           {[issue | candidates], temp_state, temp_counts}
         else
@@ -733,9 +746,11 @@ defmodule SymphonyElixir.Orchestrator do
       worker_slots_available?(state)
   end
 
-  defp should_dispatch_issue?(_issue, _state, _running_counts, _active_states, _terminal_states), do: false
+  defp should_dispatch_issue?(_issue, _state, _running_counts, _active_states, _terminal_states),
+    do: false
 
-  defp state_slots_available?(%Issue{state: issue_state}, running_counts) when is_map(running_counts) do
+  defp state_slots_available?(%Issue{state: issue_state}, running_counts)
+       when is_map(running_counts) do
     limit = Config.max_concurrent_agents_for_state(issue_state)
     used = Map.get(running_counts, normalize_issue_state(issue_state), 0)
     limit > used
@@ -824,6 +839,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:skip, :missing} ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
+
         state
 
       {:skip, %Issue{} = refreshed_issue} ->
@@ -833,6 +849,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       {:error, reason} ->
         Logger.warning("Skipping dispatch; issue refresh failed for #{issue_context(issue)}: #{inspect(reason)}")
+
         state
     end
   end
@@ -844,6 +861,7 @@ defmodule SymphonyElixir.Orchestrator do
 
       :error ->
         Logger.info("Skipping dispatch; issue no longer active or visible: #{issue_context(issue)}")
+
         state
     end
   end
@@ -864,6 +882,7 @@ defmodule SymphonyElixir.Orchestrator do
     case select_worker_host(state, preferred_worker_host) do
       :no_worker_capacity ->
         Logger.debug("No SSH worker slots available for #{issue_context(issue)} preferred_worker_host=#{inspect(preferred_worker_host)}")
+
         state
 
       worker_host ->
@@ -923,7 +942,12 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp revalidate_issue_for_dispatch(%Issue{id: issue_id}, issue_fetcher, active_states, terminal_states)
+  defp revalidate_issue_for_dispatch(
+         %Issue{id: issue_id},
+         issue_fetcher,
+         active_states,
+         terminal_states
+       )
        when is_binary(issue_id) and is_function(issue_fetcher, 1) do
     case issue_fetcher.([issue_id]) do
       {:ok, [%Issue{} = refreshed_issue | _]} ->
@@ -941,7 +965,8 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp revalidate_issue_for_dispatch(issue, _issue_fetcher, _active_states, _terminal_states), do: {:ok, issue}
+  defp revalidate_issue_for_dispatch(issue, _issue_fetcher, _active_states, _terminal_states),
+    do: {:ok, issue}
 
   defp complete_issue(%State{} = state, issue_id) do
     %{
@@ -961,6 +986,8 @@ defmodule SymphonyElixir.Orchestrator do
     due_at_ms = System.monotonic_time(:millisecond) + delay_ms
     identifier = pick_retry_identifier(issue_id, previous_retry, metadata)
     error = pick_retry_error(previous_retry, metadata)
+    delay_type = pick_retry_delay_type(previous_retry, metadata)
+    session_id = pick_retry_session_id(previous_retry, metadata)
     worker_host = pick_retry_worker_host(previous_retry, metadata)
     workspace_path = pick_retry_workspace_path(previous_retry, metadata)
 
@@ -984,18 +1011,23 @@ defmodule SymphonyElixir.Orchestrator do
             due_at_ms: due_at_ms,
             identifier: identifier,
             error: error,
+            delay_type: delay_type,
+            session_id: session_id,
             worker_host: worker_host,
             workspace_path: workspace_path
           })
     }
   end
 
-  defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token) when is_reference(retry_token) do
+  defp pop_retry_attempt_state(%State{} = state, issue_id, retry_token)
+       when is_reference(retry_token) do
     case Map.get(state.retry_attempts, issue_id) do
       %{attempt: attempt, retry_token: ^retry_token} = retry_entry ->
         metadata = %{
           identifier: Map.get(retry_entry, :identifier),
           error: Map.get(retry_entry, :error),
+          delay_type: Map.get(retry_entry, :delay_type),
+          session_id: Map.get(retry_entry, :session_id),
           worker_host: Map.get(retry_entry, :worker_host),
           workspace_path: Map.get(retry_entry, :workspace_path)
         }
@@ -1008,11 +1040,12 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_retry_issue(%State{} = state, issue_id, attempt, metadata) do
-    case Tracker.fetch_candidate_issues() do
-      {:ok, issues} ->
-        issues
-        |> find_issue_by_id(issue_id)
-        |> handle_retry_issue_lookup(state, issue_id, attempt, metadata)
+    case Tracker.fetch_issue_states_by_ids([issue_id]) do
+      {:ok, [%Issue{} = issue | _]} ->
+        handle_retry_issue_lookup(issue, state, issue_id, attempt, metadata)
+
+      {:ok, []} ->
+        handle_retry_issue_lookup(nil, state, issue_id, attempt, metadata)
 
       {:error, reason} ->
         Logger.warning("Retry poll failed for issue_id=#{issue_id} issue_identifier=#{metadata[:identifier] || issue_id}: #{inspect(reason)}")
@@ -1047,7 +1080,11 @@ defmodule SymphonyElixir.Orchestrator do
     end
   end
 
-  defp handle_retry_issue_lookup(nil, state, issue_id, _attempt, _metadata) do
+  defp handle_retry_issue_lookup(nil, state, issue_id, _attempt, metadata) do
+    if metadata[:delay_type] == :continuation do
+      cleanup_issue_workspace(metadata[:identifier], metadata[:worker_host])
+    end
+
     Logger.debug("Issue no longer visible, removing claim issue_id=#{issue_id}")
     {:noreply, release_issue_claim(state, issue_id)}
   end
@@ -1106,7 +1143,8 @@ defmodule SymphonyElixir.Orchestrator do
     %{state | claimed: MapSet.delete(state.claimed, issue_id)}
   end
 
-  defp retry_delay(attempt, metadata) when is_integer(attempt) and attempt > 0 and is_map(metadata) do
+  defp retry_delay(attempt, metadata)
+       when is_integer(attempt) and attempt > 0 and is_map(metadata) do
     if metadata[:delay_type] == :continuation and attempt == 1 do
       @continuation_retry_delay_ms
     else
@@ -1116,7 +1154,11 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp failure_retry_delay(attempt) do
     max_delay_power = min(attempt - 1, 10)
-    min(@failure_retry_base_ms * (1 <<< max_delay_power), Config.settings!().agent.max_retry_backoff_ms)
+
+    min(
+      @failure_retry_base_ms * (1 <<< max_delay_power),
+      Config.settings!().agent.max_retry_backoff_ms
+    )
   end
 
   defp normalize_retry_attempt(attempt) when is_integer(attempt) and attempt > 0, do: attempt
@@ -1135,6 +1177,14 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp pick_retry_error(previous_retry, metadata) do
     metadata[:error] || Map.get(previous_retry, :error)
+  end
+
+  defp pick_retry_delay_type(previous_retry, metadata) do
+    metadata[:delay_type] || Map.get(previous_retry, :delay_type)
+  end
+
+  defp pick_retry_session_id(previous_retry, metadata) do
+    metadata[:session_id] || Map.get(previous_retry, :session_id)
   end
 
   defp pick_retry_worker_host(previous_retry, metadata) do
@@ -1188,7 +1238,8 @@ defmodule SymphonyElixir.Orchestrator do
     |> elem(0)
   end
 
-  defp running_worker_host_count(running, worker_host) when is_map(running) and is_binary(worker_host) do
+  defp running_worker_host_count(running, worker_host)
+       when is_map(running) and is_binary(worker_host) do
     Enum.count(running, fn
       {_issue_id, %{worker_host: ^worker_host}} -> true
       _ -> false
@@ -1211,16 +1262,6 @@ defmodule SymphonyElixir.Orchestrator do
       _ ->
         true
     end
-  end
-
-  defp find_issue_by_id(issues, issue_id) when is_binary(issue_id) do
-    Enum.find(issues, fn
-      %Issue{id: ^issue_id} ->
-        true
-
-      _ ->
-        false
-    end)
   end
 
   defp find_issue_id_for_ref(running, ref) do
@@ -1254,11 +1295,10 @@ defmodule SymphonyElixir.Orchestrator do
 
   @spec request_refresh(GenServer.server()) :: map() | :unavailable
   def request_refresh(server) do
-    if Process.whereis(server) do
-      GenServer.call(server, :request_refresh)
-    else
+    GenServer.call(server, :request_refresh)
+  catch
+    :exit, _reason ->
       :unavailable
-    end
   end
 
   @spec snapshot() :: map() | :timeout | :unavailable
@@ -1266,16 +1306,10 @@ defmodule SymphonyElixir.Orchestrator do
 
   @spec snapshot(GenServer.server(), timeout()) :: map() | :timeout | :unavailable
   def snapshot(server, timeout) do
-    if Process.whereis(server) do
-      try do
-        GenServer.call(server, :snapshot, timeout)
-      catch
-        :exit, {:timeout, _} -> :timeout
-        :exit, _ -> :unavailable
-      end
-    else
-      :unavailable
-    end
+    GenServer.call(server, :snapshot, timeout)
+  catch
+    :exit, {:timeout, _} -> :timeout
+    :exit, _ -> :unavailable
   end
 
   @impl true
@@ -1920,7 +1954,7 @@ defmodule SymphonyElixir.Orchestrator do
         state
         | codex_totals: Map.get(data, "codex_totals", state.codex_totals) || state.codex_totals,
           codex_rate_limits: Map.get(data, "codex_rate_limits", state.codex_rate_limits) || state.codex_rate_limits,
-          retry_attempts: restored_retries || state.retry_attempts
+          retry_attempts: restored_retries
       }
 
       running = Map.get(data, "running", %{})
@@ -1931,6 +1965,8 @@ defmodule SymphonyElixir.Orchestrator do
           schedule_issue_retry(acc_state, issue_id, Map.get(metadata, :retry_attempt, 1), %{
             identifier: Map.get(metadata, :identifier),
             delay_type: :continuation,
+            worker_host: Map.get(metadata, :worker_host),
+            workspace_path: Map.get(metadata, :workspace_path),
             error: "Orchestrator restarted",
             session_id: Map.get(metadata, :session_id)
           })

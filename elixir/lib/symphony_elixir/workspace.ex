@@ -7,6 +7,7 @@ defmodule SymphonyElixir.Workspace do
   alias SymphonyElixir.{Config, PathSafety, SSH}
 
   @remote_workspace_marker "__SYMPHONY_WORKSPACE__"
+  @identifier_hash_length 8
 
   @type worker_host :: String.t() | nil
 
@@ -16,9 +17,7 @@ defmodule SymphonyElixir.Workspace do
     issue_context = issue_context(issue_or_identifier)
 
     try do
-      safe_id = safe_identifier(issue_context.issue_identifier)
-
-      with {:ok, workspace} <- workspace_path_for_issue(safe_id, worker_host),
+      with {:ok, workspace} <- path_for_issue(issue_context.issue_identifier, worker_host),
            :ok <- validate_workspace_path(workspace, worker_host),
            {:ok, workspace, created?} <- ensure_workspace(workspace, worker_host),
            :ok <- maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
@@ -29,6 +28,15 @@ defmodule SymphonyElixir.Workspace do
         Logger.error("Workspace creation failed #{issue_log_context(issue_context)} worker_host=#{worker_host_for_log(worker_host)} error=#{Exception.message(error)}")
         {:error, error}
     end
+  end
+
+  @spec path_for_issue(map() | String.t() | nil, worker_host()) :: {:ok, Path.t()} | {:error, term()}
+  def path_for_issue(issue_or_identifier, worker_host \\ nil) do
+    issue_or_identifier
+    |> issue_context()
+    |> Map.fetch!(:issue_identifier)
+    |> safe_identifier()
+    |> workspace_path_for_issue(worker_host)
   end
 
   defp ensure_workspace(workspace, nil) do
@@ -46,9 +54,12 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp ensure_workspace(workspace, worker_host) when is_binary(worker_host) do
+    workspace_root = Config.settings!().workspace.root
+
     script =
       [
         "set -eu",
+        remote_shell_assign("workspace_root", workspace_root),
         remote_shell_assign("workspace", workspace),
         "if [ -d \"$workspace\" ]; then",
         "  created=0",
@@ -60,8 +71,14 @@ defmodule SymphonyElixir.Workspace do
         "  mkdir -p \"$workspace\"",
         "  created=1",
         "fi",
-        "cd \"$workspace\"",
-        "printf '%s\\t%s\\t%s\\n' '#{@remote_workspace_marker}' \"$created\" \"$(pwd -P)\""
+        "root_resolved=$(cd \"$workspace_root\" && pwd -P)",
+        "workspace_resolved=$(cd \"$workspace\" && pwd -P)",
+        "case \"$workspace_resolved\" in",
+        "  \"$root_resolved\") echo 'workspace path resolved to workspace root' >&2; exit 18 ;;",
+        "  \"$root_resolved\"/*) : ;;",
+        "  *) echo 'workspace path escaped configured workspace root' >&2; exit 19 ;;",
+        "esac",
+        "printf '%s\\t%s\\t%s\\n' '#{@remote_workspace_marker}' \"$created\" \"$workspace_resolved\""
       ]
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n")
@@ -106,21 +123,27 @@ defmodule SymphonyElixir.Workspace do
   end
 
   def remove(workspace, worker_host) when is_binary(worker_host) do
-    maybe_run_before_remove_hook(workspace, worker_host)
+    case validate_workspace_path(workspace, worker_host) do
+      :ok ->
+        maybe_run_before_remove_hook(workspace, worker_host)
 
-    script =
-      [
-        remote_shell_assign("workspace", workspace),
-        "rm -rf \"$workspace\""
-      ]
-      |> Enum.join("\n")
+        script =
+          remote_workspace_guard_script(workspace)
+          |> Kernel.++([
+            "rm -rf \"$workspace_candidate\""
+          ])
+          |> Enum.join("\n")
 
-    case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
-      {:ok, {_output, 0}} ->
-        {:ok, []}
+        case run_remote_command(worker_host, script, Config.settings!().hooks.timeout_ms) do
+          {:ok, {_output, 0}} ->
+            {:ok, []}
 
-      {:ok, {output, status}} ->
-        {:error, {:workspace_remove_failed, worker_host, status, output}, ""}
+          {:ok, {output, status}} ->
+            {:error, {:workspace_remove_failed, worker_host, status, output}, ""}
+
+          {:error, reason} ->
+            {:error, reason, ""}
+        end
 
       {:error, reason} ->
         {:error, reason, ""}
@@ -132,9 +155,7 @@ defmodule SymphonyElixir.Workspace do
 
   @spec remove_issue_workspaces(term(), worker_host()) :: :ok
   def remove_issue_workspaces(identifier, worker_host) when is_binary(identifier) and is_binary(worker_host) do
-    safe_id = safe_identifier(identifier)
-
-    case workspace_path_for_issue(safe_id, worker_host) do
+    case path_for_issue(identifier, worker_host) do
       {:ok, workspace} -> remove(workspace, worker_host)
       {:error, _reason} -> :ok
     end
@@ -143,11 +164,9 @@ defmodule SymphonyElixir.Workspace do
   end
 
   def remove_issue_workspaces(identifier, nil) when is_binary(identifier) do
-    safe_id = safe_identifier(identifier)
-
     case Config.settings!().worker.ssh_hosts do
       [] ->
-        case workspace_path_for_issue(safe_id, nil) do
+        case path_for_issue(identifier, nil) do
           {:ok, workspace} -> remove(workspace, nil)
           {:error, _reason} -> :ok
         end
@@ -204,7 +223,30 @@ defmodule SymphonyElixir.Workspace do
   end
 
   defp safe_identifier(identifier) do
-    String.replace(identifier || "issue", ~r/[^a-zA-Z0-9._-]/, "_")
+    normalized_identifier = normalize_identifier(identifier)
+    sanitized_identifier = String.replace(normalized_identifier, ~r/[^a-zA-Z0-9._-]/, "_")
+
+    if sanitized_identifier == normalized_identifier do
+      sanitized_identifier
+    else
+      sanitized_identifier <> "--" <> short_identifier_hash(normalized_identifier)
+    end
+  end
+
+  defp normalize_identifier(identifier) when is_binary(identifier) do
+    case String.trim(identifier) do
+      "" -> "issue"
+      normalized_identifier -> normalized_identifier
+    end
+  end
+
+  defp normalize_identifier(_identifier), do: "issue"
+
+  defp short_identifier_hash(identifier) when is_binary(identifier) do
+    identifier
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, @identifier_hash_length)
   end
 
   defp maybe_run_after_create_hook(workspace, issue_context, created?, worker_host) do
@@ -395,6 +437,24 @@ defmodule SymphonyElixir.Workspace do
       true ->
         :ok
     end
+  end
+
+  defp remote_workspace_guard_script(workspace) when is_binary(workspace) do
+    [
+      remote_shell_assign("workspace_root", Config.settings!().workspace.root),
+      remote_shell_assign("workspace", workspace),
+      "mkdir -p \"$workspace_root\"",
+      "root_resolved=$(cd \"$workspace_root\" && pwd -P)",
+      "workspace_candidate=\"$workspace\"",
+      "if [ -e \"$workspace\" ]; then",
+      "  workspace_candidate=$(cd \"$workspace\" && pwd -P)",
+      "fi",
+      "case \"$workspace_candidate\" in",
+      "  \"$root_resolved\") echo 'refusing to operate on workspace root' >&2; exit 18 ;;",
+      "  \"$root_resolved\"/*) : ;;",
+      "  *) echo 'workspace path escaped configured workspace root' >&2; exit 19 ;;",
+      "esac"
+    ]
   end
 
   defp remote_shell_assign(variable_name, raw_path)
