@@ -34,6 +34,44 @@ defmodule SymphonyElixirWeb.PresenterTest do
     assert payload == %{
              generated_at: payload.generated_at,
              counts: %{running: 1, retrying: 1},
+             workflow_graph: %{
+               nodes: [
+                 %{
+                   id: "poll",
+                   label: "Poll",
+                   status: "live",
+                   metric: payload.workflow_graph.nodes |> Enum.at(0) |> Map.fetch!(:metric),
+                   detail: "Last refresh #{payload.generated_at}"
+                 },
+                 %{
+                   id: "dispatch",
+                   label: "Dispatch",
+                   status: "active",
+                   metric: "10 slots",
+                   detail: "1 running / 1 queued"
+                 },
+                 %{
+                   id: "run",
+                   label: "Run",
+                   status: "active",
+                   metric: "1 active",
+                   detail: payload.workflow_graph.nodes |> Enum.at(2) |> Map.fetch!(:detail)
+                 },
+                 %{
+                   id: "retry",
+                   label: "Retry",
+                   status: "warning",
+                   metric: "1 queued",
+                   detail: payload.workflow_graph.nodes |> Enum.at(3) |> Map.fetch!(:detail)
+                 }
+               ],
+               edges: [
+                 %{from: "poll", to: "dispatch"},
+                 %{from: "dispatch", to: "run"},
+                 %{from: "run", to: "retry"},
+                 %{from: "retry", to: "dispatch"}
+               ]
+             },
              running: [
                %{
                  issue_id: "issue-running",
@@ -67,6 +105,9 @@ defmodule SymphonyElixirWeb.PresenterTest do
 
     assert_iso8601_second_precision(payload.generated_at)
     assert_iso8601_second_precision(payload.retrying |> hd() |> Map.fetch!(:due_at))
+    assert payload.workflow_graph.nodes |> Enum.at(0) |> Map.fetch!(:metric) == "30.0s interval"
+    assert payload.workflow_graph.nodes |> Enum.at(2) |> Map.fetch!(:detail) =~ "Oldest run"
+    assert payload.workflow_graph.nodes |> Enum.at(3) |> Map.fetch!(:detail) =~ "Next due"
   end
 
   test "state_payload/2 returns timeout error payload" do

@@ -46,6 +46,8 @@ defmodule SymphonyElixir.DashboardLiveTest do
     assert html =~ "Retrying"
     assert html =~ "Total tokens"
     assert html =~ "Runtime"
+    assert html =~ "Workflow graph"
+    assert html =~ "Dispatch"
     assert html =~ "Rate limits"
     assert html =~ "Running sessions"
     assert html =~ "Retry queue"

@@ -17,6 +17,7 @@ defmodule SymphonyElixirWeb.Presenter do
             running: length(snapshot.running),
             retrying: length(snapshot.retrying)
           },
+          workflow_graph: workflow_graph_payload(snapshot, generated_at),
           running: Enum.map(snapshot.running, &running_entry_payload/1),
           retrying: Enum.map(snapshot.retrying, &retry_entry_payload/1),
           codex_totals: snapshot.codex_totals,
@@ -131,6 +132,94 @@ defmodule SymphonyElixirWeb.Presenter do
       workspace_path: Map.get(entry, :workspace_path)
     }
   end
+
+  defp workflow_graph_payload(snapshot, generated_at) when is_map(snapshot) and is_binary(generated_at) do
+    settings = Config.settings!()
+    running_count = length(snapshot.running)
+    retrying_count = length(snapshot.retrying)
+
+    %{
+      nodes: [
+        %{
+          id: "poll",
+          label: "Poll",
+          status: "live",
+          metric: interval_label(settings.polling.interval_ms),
+          detail: "Last refresh #{generated_at}"
+        },
+        %{
+          id: "dispatch",
+          label: "Dispatch",
+          status: dispatch_status(running_count, retrying_count),
+          metric: "#{settings.agent.max_concurrent_agents} slots",
+          detail: "#{running_count} running / #{retrying_count} queued"
+        },
+        %{
+          id: "run",
+          label: "Run",
+          status: if(running_count > 0, do: "active", else: "idle"),
+          metric: "#{running_count} active",
+          detail: running_detail(snapshot.running)
+        },
+        %{
+          id: "retry",
+          label: "Retry",
+          status: if(retrying_count > 0, do: "warning", else: "idle"),
+          metric: "#{retrying_count} queued",
+          detail: retry_detail(snapshot.retrying)
+        }
+      ],
+      edges: [
+        %{from: "poll", to: "dispatch"},
+        %{from: "dispatch", to: "run"},
+        %{from: "run", to: "retry"},
+        %{from: "retry", to: "dispatch"}
+      ]
+    }
+  end
+
+  defp interval_label(interval_ms) when is_integer(interval_ms) and interval_ms > 0 do
+    "#{Float.round(interval_ms / 1_000, 1)}s interval"
+  end
+
+  defp interval_label(_interval_ms), do: "n/a"
+
+  defp dispatch_status(running_count, retrying_count) when running_count > 0 or retrying_count > 0,
+    do: "active"
+
+  defp dispatch_status(_running_count, _retrying_count), do: "idle"
+
+  defp running_detail([]), do: "No active sessions"
+
+  defp running_detail(running_entries) when is_list(running_entries) do
+    case Enum.min_by(running_entries, &Map.get(&1, :started_at, DateTime.utc_now())) do
+      %{started_at: %DateTime{} = started_at} ->
+        "Oldest run #{runtime_label(DateTime.diff(DateTime.utc_now(), started_at, :second))}"
+
+      _ ->
+        "Active session timing unavailable"
+    end
+  end
+
+  defp retry_detail([]), do: "No queued retries"
+
+  defp retry_detail(retrying_entries) when is_list(retrying_entries) do
+    case Enum.min_by(retrying_entries, &Map.get(&1, :due_in_ms, 0)) do
+      %{due_in_ms: due_in_ms} when is_integer(due_in_ms) ->
+        "Next due #{runtime_label(div(max(due_in_ms, 0), 1_000))}"
+
+      _ ->
+        "Retry timing unavailable"
+    end
+  end
+
+  defp runtime_label(seconds) when is_integer(seconds) and seconds >= 0 do
+    mins = div(seconds, 60)
+    secs = rem(seconds, 60)
+    "#{mins}m #{secs}s"
+  end
+
+  defp runtime_label(_seconds), do: "n/a"
 
   defp running_issue_payload(running) do
     %{

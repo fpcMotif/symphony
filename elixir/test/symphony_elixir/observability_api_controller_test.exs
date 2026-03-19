@@ -46,6 +46,7 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
     state_response = Req.get!("http://127.0.0.1:#{port}/api/v1/state")
     assert state_response.status == 200
     assert state_response.body["counts"] == %{"running" => 1, "retrying" => 1}
+    assert state_response.body["workflow_graph"]["nodes"] |> length() == 4
 
     issue_response = Req.get!("http://127.0.0.1:#{port}/api/v1/MT-HTTP")
     assert issue_response.status == 200

@@ -343,6 +343,44 @@ defmodule SymphonyElixir.ExtensionsTest do
     assert state_payload == %{
              "generated_at" => state_payload["generated_at"],
              "counts" => %{"running" => 1, "retrying" => 1},
+             "workflow_graph" => %{
+               "nodes" => [
+                 %{
+                   "id" => "poll",
+                   "label" => "Poll",
+                   "status" => "live",
+                   "metric" => state_payload["workflow_graph"]["nodes"] |> Enum.at(0) |> Map.fetch!("metric"),
+                   "detail" => "Last refresh #{state_payload["generated_at"]}"
+                 },
+                 %{
+                   "id" => "dispatch",
+                   "label" => "Dispatch",
+                   "status" => "active",
+                   "metric" => "10 slots",
+                   "detail" => "1 running / 1 queued"
+                 },
+                 %{
+                   "id" => "run",
+                   "label" => "Run",
+                   "status" => "active",
+                   "metric" => "1 active",
+                   "detail" => state_payload["workflow_graph"]["nodes"] |> Enum.at(2) |> Map.fetch!("detail")
+                 },
+                 %{
+                   "id" => "retry",
+                   "label" => "Retry",
+                   "status" => "warning",
+                   "metric" => "1 queued",
+                   "detail" => state_payload["workflow_graph"]["nodes"] |> Enum.at(3) |> Map.fetch!("detail")
+                 }
+               ],
+               "edges" => [
+                 %{"from" => "poll", "to" => "dispatch"},
+                 %{"from" => "dispatch", "to" => "run"},
+                 %{"from" => "run", "to" => "retry"},
+                 %{"from" => "retry", "to" => "dispatch"}
+               ]
+             },
              "running" => [
                %{
                  "issue_id" => "issue-http",

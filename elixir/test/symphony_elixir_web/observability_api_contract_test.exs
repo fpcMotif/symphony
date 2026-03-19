@@ -47,6 +47,7 @@ defmodule SymphonyElixirWeb.ObservabilityApiContractTest do
 
     assert Map.has_key?(payload, "generated_at")
     assert Map.has_key?(payload, "counts")
+    assert Map.has_key?(payload, "workflow_graph")
     assert Map.has_key?(payload, "running")
     assert Map.has_key?(payload, "retrying")
     assert Map.has_key?(payload, "codex_totals")
