@@ -109,6 +109,32 @@ defmodule SymphonyElixirWeb.DashboardLive do
         <section class="section-card">
           <div class="section-header">
             <div>
+              <h2 class="section-title">Workflow graph</h2>
+              <p class="section-copy">Live execution stages for the current Symphony runtime.</p>
+            </div>
+          </div>
+
+          <div class="workflow-graph" role="list" aria-label="Workflow graph">
+            <div :for={{node, index} <- Enum.with_index(@payload.workflow_graph.nodes)} class="workflow-step">
+              <%= if index > 0 do %>
+                <div class="workflow-edge" aria-hidden="true">
+                  <span class="workflow-edge-line"></span>
+                  <span class="workflow-edge-arrow">→</span>
+                </div>
+              <% end %>
+
+              <article class={workflow_node_class(node.status)} role="listitem">
+                <p class="workflow-node-label"><%= node.label %></p>
+                <p class="workflow-node-metric numeric"><%= node.metric %></p>
+                <p class="workflow-node-detail"><%= node.detail %></p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section-card">
+          <div class="section-header">
+            <div>
               <h2 class="section-title">Rate limits</h2>
               <p class="section-copy">Latest upstream rate-limit snapshot, when available.</p>
             </div>
@@ -318,6 +344,17 @@ defmodule SymphonyElixirWeb.DashboardLive do
       String.contains?(normalized, ["blocked", "error", "failed"]) -> "#{base} state-badge-danger"
       String.contains?(normalized, ["todo", "queued", "pending", "retry"]) -> "#{base} state-badge-warning"
       true -> base
+    end
+  end
+
+  defp workflow_node_class(status) do
+    base = "workflow-node"
+
+    case status do
+      "live" -> "#{base} workflow-node-live"
+      "active" -> "#{base} workflow-node-active"
+      "warning" -> "#{base} workflow-node-warning"
+      _ -> "#{base} workflow-node-idle"
     end
   end
 

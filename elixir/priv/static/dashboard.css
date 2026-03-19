@@ -272,6 +272,91 @@ pre,
   padding: 1.15rem;
 }
 
+.workflow-graph {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+  overflow-x: auto;
+  margin-top: 1rem;
+  padding-bottom: 0.25rem;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: fit-content;
+}
+
+.workflow-edge {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+}
+
+.workflow-edge-line {
+  display: inline-block;
+  width: 1.8rem;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(110, 110, 128, 0.18), rgba(110, 110, 128, 0.7));
+}
+
+.workflow-edge-arrow {
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.workflow-node {
+  min-width: 13rem;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(243, 244, 246, 0.92));
+  padding: 0.95rem 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.workflow-node-live {
+  border-color: rgba(16, 163, 127, 0.18);
+  background: linear-gradient(180deg, rgba(232, 250, 244, 0.95), rgba(255, 255, 255, 0.94));
+}
+
+.workflow-node-active {
+  border-color: rgba(16, 163, 127, 0.3);
+  box-shadow: 0 10px 24px rgba(16, 163, 127, 0.12);
+}
+
+.workflow-node-warning {
+  border-color: rgba(180, 35, 24, 0.22);
+  background: linear-gradient(180deg, rgba(254, 243, 242, 0.95), rgba(255, 255, 255, 0.94));
+}
+
+.workflow-node-idle {
+  opacity: 0.88;
+}
+
+.workflow-node-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.workflow-node-metric {
+  margin: 0.35rem 0 0;
+  font-size: 1.35rem;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.workflow-node-detail {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
