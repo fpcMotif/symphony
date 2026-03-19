@@ -100,6 +100,26 @@ defmodule Mix.Tasks.Workspace.BeforeRemoveTest do
     )
   end
 
+  test "uses custom repo when repo option is passed" do
+    with_fake_gh(fn log_path ->
+      File.write!(log_path, "")
+
+      {output, _error_output} =
+        capture_task_output(fn ->
+          BeforeRemove.run(["--branch", "feature/workpad", "--repo", "custom/repo"])
+        end)
+
+      assert output =~ "Closed PR #101 for branch feature/workpad"
+
+      log = File.read!(log_path)
+
+      assert log =~ "auth status"
+      assert log =~ "pr list --repo custom/repo --head feature/workpad --state open --json number --jq .[].number"
+      assert log =~ "pr close 101 --repo custom/repo"
+      assert log =~ "pr close 102 --repo custom/repo"
+    end)
+  end
+
   test "closes open pull requests for the branch and tolerates close failures" do
     with_fake_gh(fn log_path ->
       File.write!(log_path, "")
