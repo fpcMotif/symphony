@@ -518,8 +518,12 @@ defmodule SymphonyElixir.Codex.AppServer do
   end
 
   defp handle_turn_method(
-         %{port: port, on_message: on_message, tool_executor: tool_executor, auto_approve_requests: auto_approve_requests} =
-           turn_state,
+         %{
+           port: port,
+           on_message: on_message,
+           tool_executor: tool_executor,
+           auto_approve_requests: auto_approve_requests
+         } = turn_state,
          payload,
          payload_string,
          method
@@ -899,8 +903,7 @@ defmodule SymphonyElixir.Codex.AppServer do
     session_option =
       Enum.find(options, fn option ->
         label = Map.get(option, "label", "")
-        normalized = label |> String.trim() |> String.downcase()
-        normalized == "approve this session"
+        label |> String.trim() |> String.downcase() == "approve this session"
       end)
 
     case session_option do
