@@ -591,7 +591,10 @@ defmodule SymphonyElixir.WorkspaceAndConfigTest do
         "symphony-elixir-missing-#{System.unique_integer([:positive])}"
       )
 
-    assert {:ok, []} = Workspace.remove(random_path)
+    # Now that we validate the path unconditionally, removing an invalid path
+    # will return the validation error, not {:ok, []}.
+    assert {:error, {:workspace_outside_root, ^random_path, _root}, ""} =
+             Workspace.remove(random_path)
   end
 
   test "workspace hooks support multiline YAML scripts and run at lifecycle boundaries" do

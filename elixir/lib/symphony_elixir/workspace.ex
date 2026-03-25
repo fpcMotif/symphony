@@ -89,19 +89,13 @@ defmodule SymphonyElixir.Workspace do
 
   @spec remove(Path.t(), worker_host()) :: {:ok, [String.t()]} | {:error, term(), String.t()}
   def remove(workspace, nil) do
-    case File.exists?(workspace) do
-      true ->
-        case validate_workspace_path(workspace, nil) do
-          :ok ->
-            maybe_run_before_remove_hook(workspace, nil)
-            File.rm_rf(workspace)
-
-          {:error, reason} ->
-            {:error, reason, ""}
-        end
-
-      false ->
+    case validate_workspace_path(workspace, nil) do
+      :ok ->
+        maybe_run_before_remove_hook(workspace, nil)
         File.rm_rf(workspace)
+
+      {:error, reason} ->
+        {:error, reason, ""}
     end
   end
 
