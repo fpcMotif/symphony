@@ -63,6 +63,7 @@ defmodule SymphonyElixir.HttpServer do
   defp parse_host({_, _, _, _} = ip), do: {:ok, ip}
   defp parse_host({_, _, _, _, _, _, _, _} = ip), do: {:ok, ip}
 
+  defp parse_host(host) when host in ["", nil], do: {:ok, {127, 0, 0, 1}}
   defp parse_host(host) when is_binary(host) do
     charhost = String.to_charlist(host)
 

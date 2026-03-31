@@ -115,9 +115,3 @@ defmodule SymphonyElixir.HttpServerTest do
     System.delete_env("SECRET_KEY_BASE")
   end
 end
-
-test "bound_port/0 returns nil when adapter returns unexpected format" do
-  # We can mock Bandit.PhoenixAdapter using Erlang's meck or by replacing the module
-  # But a simpler way since Endpoint is hardcoded: we can't.
-  # We will just accept 93.94% coverage because it's impossible to force Bandit to return `_ -> nil` cleanly without mocks
-end
