@@ -31,11 +31,11 @@ defmodule SymphonyElixir.ConfigTest do
   test "max_concurrent_agents_for_state normalizes state names and falls back" do
     write_workflow_file!(Workflow.workflow_file_path(),
       max_concurrent_agents: 9,
-      max_concurrent_agents_by_state: %{"in progress" => 2, "todo" => 4}
+      max_concurrent_agents_by_state: %{"in progress" => 2, "backlog" => 4}
     )
 
     assert Config.max_concurrent_agents_for_state("In Progress") == 2
-    assert Config.max_concurrent_agents_for_state("TODO") == 4
+    assert Config.max_concurrent_agents_for_state("Backlog") == 4
     assert Config.max_concurrent_agents_for_state("Blocked") == 9
     assert Config.max_concurrent_agents_for_state(:todo) == 9
   end
