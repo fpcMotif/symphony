@@ -73,17 +73,23 @@ defmodule SymphonyElixir.SpecsCheck do
   defp find_missing_specs(body, module_name, file, exemptions) do
     body
     |> normalize_block()
-    |> Enum.reduce(initial_state(), fn form, state ->
-      consume_form(form, state, module_name, file, exemptions)
-    end)
+    |> Enum.reduce(initial_state(module_name, file, exemptions), &consume_form/2)
     |> Map.fetch!(:findings)
   end
 
-  defp initial_state do
-    %{pending_specs: MapSet.new(), pending_impl: false, seen_defs: MapSet.new(), findings: []}
+  defp initial_state(module_name, file, exemptions) do
+    %{
+      pending_specs: MapSet.new(),
+      pending_impl: false,
+      seen_defs: MapSet.new(),
+      findings: [],
+      module_name: module_name,
+      file: file,
+      exemptions: exemptions
+    }
   end
 
-  defp consume_form({:@, _, [{:spec, _, spec_nodes}]}, state, _module_name, _file, _exemptions) do
+  defp consume_form({:@, _, [{:spec, _, spec_nodes}]}, state) do
     ids =
       spec_nodes
       |> Enum.flat_map(&extract_spec_identifiers/1)
@@ -92,13 +98,14 @@ defmodule SymphonyElixir.SpecsCheck do
     %{state | pending_specs: MapSet.union(state.pending_specs, ids)}
   end
 
-  defp consume_form({:@, _, [{:impl, _, _}]}, state, _module_name, _file, _exemptions) do
+  defp consume_form({:@, _, [{:impl, _, _}]}, state) do
     %{state | pending_impl: true}
   end
 
-  defp consume_form({:@, _, _}, state, _module_name, _file, _exemptions), do: state
+  defp consume_form({:@, _, _}, state), do: state
 
-  defp consume_form({:def, meta, [head_ast, _]} = _form, state, module_name, file, exemptions) do
+  defp consume_form({:def, meta, [head_ast, _]} = _form, state) do
+    %{module_name: module_name, file: file, exemptions: exemptions} = state
     {name, arity} = def_head_to_identifier(head_ast)
 
     id = {name, arity}
@@ -129,11 +136,11 @@ defmodule SymphonyElixir.SpecsCheck do
     end
   end
 
-  defp consume_form({:defp, _, _}, state, _module_name, _file, _exemptions) do
+  defp consume_form({:defp, _, _}, state) do
     %{state | pending_specs: MapSet.new(), pending_impl: false}
   end
 
-  defp consume_form(_form, state, _module_name, _file, _exemptions) do
+  defp consume_form(_form, state) do
     %{state | pending_specs: MapSet.new(), pending_impl: false}
   end
 
