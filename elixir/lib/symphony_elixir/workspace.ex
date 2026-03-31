@@ -153,7 +153,12 @@ defmodule SymphonyElixir.Workspace do
         end
 
       worker_hosts ->
-        Enum.each(worker_hosts, &remove_issue_workspaces(identifier, &1))
+        worker_hosts
+        |> Task.async_stream(&remove_issue_workspaces(identifier, &1),
+          max_concurrency: System.schedulers_online() * 2,
+          timeout: :infinity
+        )
+        |> Stream.run()
     end
 
     :ok
