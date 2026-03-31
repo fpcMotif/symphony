@@ -73,4 +73,24 @@ defmodule SymphonyElixir.HttpServerTest do
     assert mod == HttpServer
     assert fun == :start_link
   end
+
+  test "start_link/0 returns :ignore by default when no config port is set" do
+    assert HttpServer.start_link() == :ignore
+  end
+
+  test "start_link/1 normalizes nil and empty host strings to 127.0.0.1" do
+    assert {:ok, pid1} = HttpServer.start_link(port: 0, host: nil)
+    GenServer.stop(pid1)
+
+    assert {:ok, pid2} = HttpServer.start_link(port: 0, host: "")
+    GenServer.stop(pid2)
+  end
+
+  test "bound_port/1 returns nil when server_info raises or fails" do
+    if Process.whereis(Endpoint) do
+      GenServer.stop(Endpoint)
+    end
+
+    assert HttpServer.bound_port() == nil
+  end
 end
