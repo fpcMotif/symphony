@@ -116,7 +116,7 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
     endpoint_config =
       :symphony_elixir
       |> Application.get_env(SymphonyElixirWeb.Endpoint, [])
-      |> Keyword.merge(server: false, secret_key_base: String.duplicate("s", 64), orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
+      |> Keyword.merge(server: false, secret_key_base: String.duplicate("s", 64), check_origin: true, orchestrator: orchestrator_name, snapshot_timeout_ms: 50)
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
 

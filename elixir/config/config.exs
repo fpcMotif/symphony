@@ -11,6 +11,7 @@ config :symphony_elixir, SymphonyElixirWeb.Endpoint,
   ],
   pubsub_server: SymphonyElixir.PubSub,
   secret_key_base: System.get_env("SECRET_KEY_BASE") || Base.encode64(:crypto.strong_rand_bytes(48), padding: false),
+  # ensure only same-origin requests are allowed
   check_origin: true,
   server: false
 
