@@ -1284,54 +1284,13 @@ defmodule SymphonyElixir.Orchestrator do
     now = DateTime.utc_now()
     now_ms = System.monotonic_time(:millisecond)
 
-    running =
-      state.running
-      |> Enum.map(fn {issue_id, metadata} ->
-        %{
-          issue_id: issue_id,
-          identifier: metadata.identifier,
-          state: metadata.issue.state,
-          worker_host: Map.get(metadata, :worker_host),
-          workspace_path: Map.get(metadata, :workspace_path),
-          session_id: metadata.session_id,
-          codex_app_server_pid: metadata.codex_app_server_pid,
-          codex_input_tokens: metadata.codex_input_tokens,
-          codex_output_tokens: metadata.codex_output_tokens,
-          codex_total_tokens: metadata.codex_total_tokens,
-          turn_count: Map.get(metadata, :turn_count, 0),
-          started_at: metadata.started_at,
-          last_codex_timestamp: metadata.last_codex_timestamp,
-          last_codex_message: metadata.last_codex_message,
-          last_codex_event: metadata.last_codex_event,
-          runtime_seconds: running_seconds(metadata.started_at, now)
-        }
-      end)
-
-    retrying =
-      state.retry_attempts
-      |> Enum.map(fn {issue_id, %{attempt: attempt, due_at_ms: due_at_ms} = retry} ->
-        %{
-          issue_id: issue_id,
-          attempt: attempt,
-          due_in_ms: max(0, due_at_ms - now_ms),
-          identifier: Map.get(retry, :identifier),
-          error: Map.get(retry, :error),
-          worker_host: Map.get(retry, :worker_host),
-          workspace_path: Map.get(retry, :workspace_path)
-        }
-      end)
-
     {:reply,
      %{
-       running: running,
-       retrying: retrying,
+       running: build_running_snapshot(state.running, now),
+       retrying: build_retrying_snapshot(state.retry_attempts, now_ms),
        codex_totals: state.codex_totals,
        rate_limits: Map.get(state, :codex_rate_limits),
-       polling: %{
-         checking?: state.poll_check_in_progress == true,
-         next_poll_in_ms: next_poll_in_ms(state.next_poll_due_at_ms, now_ms),
-         poll_interval_ms: state.poll_interval_ms
-       }
+       polling: build_polling_snapshot(state, now_ms)
      }, state}
   end
 
@@ -1944,5 +1903,52 @@ defmodule SymphonyElixir.Orchestrator do
     e ->
       Logger.warning("Failed to restore orchestrator state: #{inspect(e)}")
       state
+  end
+
+  defp build_running_snapshot(running, now) do
+    running
+    |> Enum.map(fn {issue_id, metadata} ->
+      %{
+        issue_id: issue_id,
+        identifier: metadata.identifier,
+        state: metadata.issue.state,
+        worker_host: Map.get(metadata, :worker_host),
+        workspace_path: Map.get(metadata, :workspace_path),
+        session_id: metadata.session_id,
+        codex_app_server_pid: metadata.codex_app_server_pid,
+        codex_input_tokens: metadata.codex_input_tokens,
+        codex_output_tokens: metadata.codex_output_tokens,
+        codex_total_tokens: metadata.codex_total_tokens,
+        turn_count: Map.get(metadata, :turn_count, 0),
+        started_at: metadata.started_at,
+        last_codex_timestamp: metadata.last_codex_timestamp,
+        last_codex_message: metadata.last_codex_message,
+        last_codex_event: metadata.last_codex_event,
+        runtime_seconds: running_seconds(metadata.started_at, now)
+      }
+    end)
+  end
+
+  defp build_retrying_snapshot(retry_attempts, now_ms) do
+    retry_attempts
+    |> Enum.map(fn {issue_id, %{attempt: attempt, due_at_ms: due_at_ms} = retry} ->
+      %{
+        issue_id: issue_id,
+        attempt: attempt,
+        due_in_ms: max(0, due_at_ms - now_ms),
+        identifier: Map.get(retry, :identifier),
+        error: Map.get(retry, :error),
+        worker_host: Map.get(retry, :worker_host),
+        workspace_path: Map.get(retry, :workspace_path)
+      }
+    end)
+  end
+
+  defp build_polling_snapshot(state, now_ms) do
+    %{
+      checking?: state.poll_check_in_progress == true,
+      next_poll_in_ms: next_poll_in_ms(state.next_poll_due_at_ms, now_ms),
+      poll_interval_ms: state.poll_interval_ms
+    }
   end
 end
