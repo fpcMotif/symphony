@@ -38,10 +38,4 @@ defmodule SymphonyElixir.Application do
       name: SymphonyElixir.Supervisor
     )
   end
-
-  @impl true
-  def stop(_state) do
-    SymphonyElixir.StatusDashboard.render_offline_status()
-    :ok
-  end
 end

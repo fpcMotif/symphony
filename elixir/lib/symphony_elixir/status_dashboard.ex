@@ -96,6 +96,8 @@ defmodule SymphonyElixir.StatusDashboard do
 
   @spec init(keyword()) :: {:ok, t()}
   def init(opts) do
+    Process.flag(:trap_exit, true)
+
     refresh_ms_override = keyword_override(opts, :refresh_ms)
     enabled_override = keyword_override(opts, :enabled)
     render_interval_ms_override = keyword_override(opts, :render_interval_ms)
@@ -126,7 +128,13 @@ defmodule SymphonyElixir.StatusDashboard do
      }}
   end
 
+  @spec terminate(term(), t()) :: :ok
+  def terminate(_reason, _state) do
+    render_offline_status()
+  end
+
   @spec render_offline_status() :: :ok
+
   def render_offline_status do
     content =
       [

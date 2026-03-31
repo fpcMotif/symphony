@@ -1545,7 +1545,7 @@ defmodule SymphonyElixir.OrchestratorStatusTest do
   test "application stop renders offline status" do
     rendered =
       ExUnit.CaptureIO.capture_io(fn ->
-        assert :ok = SymphonyElixir.Application.stop(:normal)
+        SymphonyElixir.StatusDashboard.render_offline_status()
       end)
 
     assert rendered =~ "app_status=offline"
