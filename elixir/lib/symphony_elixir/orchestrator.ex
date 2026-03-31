@@ -1297,6 +1297,7 @@ defmodule SymphonyElixir.Orchestrator do
        }
      }, state}
   end
+
   def handle_call({:create_comment, issue_id, body}, _from, state) do
     result = Tracker.create_comment(issue_id, body)
     {:reply, result, state}
