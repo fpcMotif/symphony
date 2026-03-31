@@ -1,5 +1,5 @@
 defmodule SymphonyElixir.TrackerTest do
-  use SymphonyElixir.TestSupport
+  use SymphonyElixir.TestSupport, async: false
   alias SymphonyElixir.Tracker
   alias SymphonyElixir.Workflow
 
@@ -13,14 +13,13 @@ defmodule SymphonyElixir.TrackerTest do
 
   describe "fetch_candidate_issues/0" do
     test "delegates to the configured adapter and normalizes the response" do
-      # Configure a custom memory-like stub just for this test
       defmodule TrackerStub do
         def fetch_candidate_issues do
           {:ok, [%{id: "ISSUE-123", state: "Todo"}]}
         end
       end
 
-      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: "SymphonyElixir.TrackerTest.TrackerStub")
+      Application.put_env(:symphony_elixir, :tracker_adapter_module, TrackerStub)
 
       assert {:ok, [%{id: "ISSUE-123", state: "Todo"}]} = Tracker.fetch_candidate_issues()
     end
@@ -32,7 +31,7 @@ defmodule SymphonyElixir.TrackerTest do
         end
       end
 
-      write_workflow_file!(Workflow.workflow_file_path(), tracker_kind: "custom", tracker_adapter_module: "SymphonyElixir.TrackerTest.ErrorTrackerStub")
+      Application.put_env(:symphony_elixir, :tracker_adapter_module, ErrorTrackerStub)
 
       assert {:error, :service_unavailable} = Tracker.fetch_candidate_issues()
     end
