@@ -144,11 +144,11 @@ defmodule SymphonyElixir.Config do
                                    default: @default_observability_enabled
                                  ],
                                  refresh_ms: [
-                                   type: :integer,
+                                   type: :pos_integer,
                                    default: @default_observability_refresh_ms
                                  ],
                                  render_interval_ms: [
-                                   type: :integer,
+                                   type: :pos_integer,
                                    default: @default_observability_render_interval_ms
                                  ]
                                ]
@@ -519,8 +519,8 @@ defmodule SymphonyElixir.Config do
   defp extract_observability_options(section) do
     %{}
     |> put_if_present(:enabled, boolean_value(Map.get(section, "enabled")))
-    |> put_if_present(:refresh_ms, integer_value(Map.get(section, "refresh_ms")))
-    |> put_if_present(:render_interval_ms, integer_value(Map.get(section, "render_interval_ms")))
+    |> put_if_present(:refresh_ms, positive_integer_value(Map.get(section, "refresh_ms")))
+    |> put_if_present(:render_interval_ms, positive_integer_value(Map.get(section, "render_interval_ms")))
   end
 
   defp extract_server_options(section) do

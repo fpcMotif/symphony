@@ -35,6 +35,10 @@ codex:
   linear_graphql_enabled: true
   turn_sandbox_policy:
     type: workspaceWrite
+observability:
+  enabled: true
+  refresh_ms: 1000
+  render_interval_ms: 16
 ---
 
 You are working on a Linear ticket `{{ issue.identifier }}`
