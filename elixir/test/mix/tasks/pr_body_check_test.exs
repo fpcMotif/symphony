@@ -65,6 +65,12 @@ defmodule Mix.Tasks.PrBody.CheckTest do
     end
   end
 
+  test "fails when file option is missing (empty args)" do
+    assert_raise Mix.Error, ~r/Missing required option --file/, fn ->
+      Check.run([])
+    end
+  end
+
   test "fails when file option is missing" do
     assert_raise Mix.Error, ~r/Missing required option --file/, fn ->
       Check.run(["lint"])
