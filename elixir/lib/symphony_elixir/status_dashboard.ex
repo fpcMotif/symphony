@@ -1363,10 +1363,10 @@ defmodule SymphonyElixir.StatusDashboard do
         map_path(payload, [:params, :question]) ||
         map_path(payload, [:params, :prompt])
 
-    if is_binary(question) and String.trim(question) != "" do
-      "tool requires user input: #{inline_text(question)}"
-    else
+    if blank?(question) do
       "tool requires user input"
+    else
+      "tool requires user input: #{inline_text(question)}"
     end
   end
 
@@ -1395,10 +1395,10 @@ defmodule SymphonyElixir.StatusDashboard do
   defp humanize_codex_method("item/tool/call", payload) do
     tool = dynamic_tool_name(payload)
 
-    if is_binary(tool) and String.trim(tool) != "" do
-      "dynamic tool call requested (#{tool})"
-    else
+    if blank?(tool) do
       "dynamic tool call requested"
+    else
+      "dynamic tool call requested (#{tool})"
     end
   end
 
@@ -1958,4 +1958,7 @@ defmodule SymphonyElixir.StatusDashboard do
 
   defp resolve_override(nil, default), do: default
   defp resolve_override(override, _default), do: override
+  defp blank?(nil), do: true
+  defp blank?(str) when is_binary(str), do: String.trim(str) == ""
+  defp blank?(_), do: true
 end
