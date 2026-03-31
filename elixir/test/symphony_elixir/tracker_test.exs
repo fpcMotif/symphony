@@ -7,6 +7,7 @@ defmodule SymphonyElixir.TrackerTest do
     on_exit(fn ->
       Application.delete_env(:symphony_elixir, :tracker_adapter_module)
     end)
+
     :ok
   end
 
