@@ -12,5 +12,5 @@ config :symphony_elixir, SymphonyElixirWeb.Endpoint,
   pubsub_server: SymphonyElixir.PubSub,
   live_view: [signing_salt: "symphony-live-view"],
   secret_key_base: System.get_env("SECRET_KEY_BASE") || Base.encode64(:crypto.strong_rand_bytes(48), padding: false),
-  check_origin: true,
+  check_origin: ["//localhost", "//127.0.0.1"],
   server: false
