@@ -73,4 +73,45 @@ defmodule SymphonyElixir.HttpServerTest do
     assert mod == HttpServer
     assert fun == :start_link
   end
+
+  test "start_link/0 without args uses Config defaults" do
+    HttpServer.start_link()
+  end
+
+  test "parse_host handles invalid host appropriately" do
+    assert {:error, _} = HttpServer.start_link(port: 0, host: "invalid.local.domain.test")
+  end
+
+  test "bound_port/0 catches exits and rescues errors" do
+    assert HttpServer.bound_port(:some_unbound_server) == nil
+  end
+
+  test "normalize_host works with nil host parameter" do
+    assert {:ok, _} = HttpServer.start_link(port: 0, host: nil)
+    GenServer.stop(Endpoint)
+  end
+
+  test "normalize_host works with empty string parameter" do
+    assert {:ok, _} = HttpServer.start_link(port: 0, host: "")
+    GenServer.stop(Endpoint)
+  end
+
+  test "configuration overrides are correctly parsed" do
+    assert {:ok, _} = HttpServer.start_link(port: 0, orchestrator: SomeFakeOrchestrator, snapshot_timeout_ms: 1234)
+    env = Application.get_env(:symphony_elixir, Endpoint)
+    assert env[:http][:port] == 0
+    assert env[:orchestrator] == SomeFakeOrchestrator
+    assert env[:snapshot_timeout_ms] == 1234
+    assert is_binary(env[:secret_key_base])
+    GenServer.stop(Endpoint)
+  end
+
+  test "secret_key_base uses environment variable if available" do
+    System.put_env("SECRET_KEY_BASE", "env_secret")
+    assert {:ok, _} = HttpServer.start_link(port: 0)
+    env = Application.get_env(:symphony_elixir, Endpoint)
+    assert env[:secret_key_base] == "env_secret"
+    GenServer.stop(Endpoint)
+    System.delete_env("SECRET_KEY_BASE")
+  end
 end
