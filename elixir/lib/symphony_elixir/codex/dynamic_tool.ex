@@ -92,15 +92,9 @@ defmodule SymphonyElixir.Codex.DynamicTool do
 
   defp normalize_linear_graphql_arguments(_arguments), do: {:error, :invalid_arguments}
 
-  defp normalize_query(arguments) do
-    case Map.get(arguments, "query") || Map.get(arguments, :query) do
-      query when is_binary(query) ->
-        normalize_query_string(query)
-
-      _ ->
-        {:error, :missing_query}
-    end
-  end
+  defp normalize_query(%{"query" => query}) when is_binary(query), do: normalize_query_string(query)
+  defp normalize_query(%{query: query}) when is_binary(query), do: normalize_query_string(query)
+  defp normalize_query(_arguments), do: {:error, :missing_query}
 
   defp normalize_query_string(query) when is_binary(query) do
     case String.trim(query) do
@@ -112,12 +106,11 @@ defmodule SymphonyElixir.Codex.DynamicTool do
     end
   end
 
-  defp normalize_variables(arguments) do
-    case Map.get(arguments, "variables") || Map.get(arguments, :variables) || %{} do
-      variables when is_map(variables) -> {:ok, variables}
-      _ -> {:error, :invalid_variables}
-    end
-  end
+  defp normalize_variables(%{"variables" => variables}) when is_map(variables), do: {:ok, variables}
+  defp normalize_variables(%{variables: variables}) when is_map(variables), do: {:ok, variables}
+  defp normalize_variables(%{"variables" => _}), do: {:error, :invalid_variables}
+  defp normalize_variables(%{variables: _}), do: {:error, :invalid_variables}
+  defp normalize_variables(_arguments), do: {:ok, %{}}
 
   defp validate_single_graphql_operation(query) when is_binary(query) do
     operation_count =
