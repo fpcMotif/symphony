@@ -177,14 +177,19 @@ defmodule SymphonyElixir.CLI do
         System.halt(1)
 
       pid ->
-        ref = Process.monitor(pid)
+        monitor_and_wait(pid)
+    end
+  end
 
-        receive do
-          {:DOWN, ^ref, :process, ^pid, reason} ->
-            case reason do
-              :normal -> System.halt(0)
-              _ -> System.halt(1)
-            end
+  @spec monitor_and_wait(pid()) :: no_return()
+  defp monitor_and_wait(pid) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, ^pid, reason} ->
+        case reason do
+          :normal -> System.halt(0)
+          _ -> System.halt(1)
         end
     end
   end
