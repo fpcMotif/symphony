@@ -92,44 +92,70 @@ defmodule SymphonyElixir.Codex.AppServer do
 
     case start_turn(session, prompt, issue) do
       {:ok, turn_id} ->
-        session_id = "#{thread_id}-#{turn_id}"
-        Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
-
-        emit_message(
-          on_message,
-          :session_started,
-          %{
-            session_id: session_id,
-            thread_id: thread_id,
-            turn_id: turn_id
-          },
-          metadata
-        )
-
-        await_turn_result(
+        handle_start_turn_success(
+          turn_id,
           port,
+          thread_id,
+          issue,
+          metadata,
           on_message,
           tool_executor,
-          auto_approve_requests,
-          %{
-            issue: issue,
-            metadata: metadata,
-            session_id: session_id,
-            thread_id: thread_id,
-            turn_id: turn_id
-          }
+          auto_approve_requests
         )
 
       {:error, reason} ->
-        Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
-        emit_message(on_message, :startup_failed, %{reason: reason}, metadata)
-        {:error, reason}
+        handle_start_turn_error(reason, issue, metadata, on_message)
     end
   end
 
   @spec stop_session(session()) :: :ok
   def stop_session(%{port: port}) when is_port(port) do
     stop_port(port)
+  end
+
+  defp handle_start_turn_success(
+         turn_id,
+         port,
+         thread_id,
+         issue,
+         metadata,
+         on_message,
+         tool_executor,
+         auto_approve_requests
+       ) do
+    session_id = "#{thread_id}-#{turn_id}"
+    Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
+
+    emit_message(
+      on_message,
+      :session_started,
+      %{
+        session_id: session_id,
+        thread_id: thread_id,
+        turn_id: turn_id
+      },
+      metadata
+    )
+
+    await_turn_result(
+      port,
+      on_message,
+      tool_executor,
+      auto_approve_requests,
+      %{
+        issue: issue,
+        metadata: metadata,
+        session_id: session_id,
+        thread_id: thread_id,
+        turn_id: turn_id
+      }
+    )
+  end
+
+  defp handle_start_turn_error(reason, issue, metadata, on_message) do
+    Logger.error("Codex session failed for #{issue_context(issue)}: #{inspect(reason)}")
+    emit_message(on_message, :startup_failed, %{reason: reason}, metadata)
+    {:error, reason}
   end
 
   defp await_turn_result(
