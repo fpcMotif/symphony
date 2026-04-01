@@ -61,7 +61,7 @@ defmodule SymphonyElixir.StaticAssetControllerTest do
     endpoint_config =
       :symphony_elixir
       |> Application.get_env(SymphonyElixirWeb.Endpoint, [])
-      |> Keyword.merge(server: false, secret_key_base: String.duplicate("s", 64))
+      |> Keyword.merge(server: false, secret_key_base: String.duplicate("s", 64), check_origin: true)
       |> Keyword.merge(overrides)
 
     Application.put_env(:symphony_elixir, SymphonyElixirWeb.Endpoint, endpoint_config)
