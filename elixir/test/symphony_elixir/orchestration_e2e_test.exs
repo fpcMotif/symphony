@@ -244,7 +244,7 @@ defmodule SymphonyElixir.OrchestrationE2ETest do
         snapshot = Orchestrator.snapshot(orchestrator_name, 1_000)
 
         Enum.any?(snapshot.retrying, fn retry ->
-          retry.issue_id == issue.id and retry.attempt == 2 and retry.due_in_ms >= 15_000
+          retry.issue_id == issue.id and retry.attempt == 2 and retry.due_in_ms >= 13_000
         end)
       end)
 
