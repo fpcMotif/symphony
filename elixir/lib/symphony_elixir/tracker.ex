@@ -61,9 +61,19 @@ defmodule SymphonyElixir.Tracker do
 
     Application.get_env(:symphony_elixir, :tracker_adapter_module) ||
       case settings.tracker.kind do
-        "memory" -> SymphonyElixir.Tracker.Memory
-        "custom" -> String.to_atom("Elixir." <> settings.tracker.adapter_module)
-        _ -> SymphonyElixir.Linear.Adapter
+        "memory" ->
+          SymphonyElixir.Tracker.Memory
+
+        "custom" ->
+          try do
+            String.to_existing_atom("Elixir." <> settings.tracker.adapter_module)
+          rescue
+            ArgumentError ->
+              raise ArgumentError, "Invalid or non-existent custom tracker adapter module: #{settings.tracker.adapter_module}"
+          end
+
+        _ ->
+          SymphonyElixir.Linear.Adapter
       end
   end
 
