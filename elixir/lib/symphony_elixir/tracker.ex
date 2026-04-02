@@ -69,7 +69,7 @@ defmodule SymphonyElixir.Tracker do
             String.to_existing_atom("Elixir." <> settings.tracker.adapter_module)
           rescue
             ArgumentError ->
-              raise ArgumentError, "Invalid or non-existent custom tracker adapter module: #{settings.tracker.adapter_module}"
+              reraise ArgumentError, "Invalid or non-existent custom tracker adapter module: #{settings.tracker.adapter_module}", __STACKTRACE__
           end
 
         _ ->

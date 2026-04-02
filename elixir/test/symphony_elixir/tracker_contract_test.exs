@@ -199,6 +199,8 @@ defmodule SymphonyElixir.TrackerContractTest do
     end
 
     test "raises error when configured with an invalid custom adapter module" do
+      Application.put_env(:symphony_elixir, :tracker_adapter_module, nil)
+
       write_workflow_file!(Workflow.workflow_file_path(),
         tracker_kind: "custom",
         tracker_adapter_module: "NonExistentModuleForTest123"
