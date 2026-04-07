@@ -888,22 +888,11 @@ defmodule SymphonyElixir.StatusDashboard do
       end)
 
     bucket_sums =
-      Enum.reduce(rates, %{}, fn {timestamp, tps}, acc ->
-        idx =
-          if timestamp < graph_window_start do
-            -1
-          else
-            div(timestamp - graph_window_start, bucket_ms)
-          end
-
-        idx = if idx == @throughput_graph_columns, do: @throughput_graph_columns - 1, else: idx
-
-        if idx >= 0 and idx < @throughput_graph_columns do
-          Map.update(acc, idx, {tps, 1}, fn {sum, count} -> {sum + tps, count + 1} end)
-        else
-          acc
-        end
-      end)
+      Enum.reduce(
+        rates,
+        %{},
+        &aggregate_bucket_sums(&1, &2, graph_window_start, bucket_ms)
+      )
 
     bucketed_tps =
       Enum.map(0..(@throughput_graph_columns - 1), fn idx ->
@@ -926,6 +915,23 @@ defmodule SymphonyElixir.StatusDashboard do
 
       Enum.at(@sparkline_blocks, index, "▁")
     end)
+  end
+
+  defp aggregate_bucket_sums({timestamp, tps}, acc, graph_window_start, bucket_ms) do
+    idx =
+      if timestamp < graph_window_start do
+        -1
+      else
+        div(timestamp - graph_window_start, bucket_ms)
+      end
+
+    idx = if idx == @throughput_graph_columns, do: @throughput_graph_columns - 1, else: idx
+
+    if idx >= 0 and idx < @throughput_graph_columns do
+      Map.update(acc, idx, {tps, 1}, fn {sum, count} -> {sum + tps, count + 1} end)
+    else
+      acc
+    end
   end
 
   defp format_rate_limits(nil), do: colorize("unavailable", @ansi_gray)
