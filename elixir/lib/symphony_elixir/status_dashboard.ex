@@ -1771,7 +1771,6 @@ defmodule SymphonyElixir.StatusDashboard do
 
   defp inline_text(other), do: other |> to_string() |> inline_text()
 
-
   defp token_usage_paths do
     [
       ["params", "msg", "payload", "info", "total_token_usage"],
