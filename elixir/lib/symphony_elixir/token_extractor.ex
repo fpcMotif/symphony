@@ -42,21 +42,25 @@ defmodule SymphonyElixir.TokenExtractor do
   @doc """
   Extracts input tokens from a usage map.
   """
+  @spec extract_input(map() | nil) :: integer() | nil
   def extract_input(usage), do: extract_value(usage, @input_keys)
 
   @doc """
   Extracts output tokens from a usage map.
   """
+  @spec extract_output(map() | nil) :: integer() | nil
   def extract_output(usage), do: extract_value(usage, @output_keys)
 
   @doc """
   Extracts total tokens from a usage map.
   """
+  @spec extract_total(map() | nil) :: integer() | nil
   def extract_total(usage), do: extract_value(usage, @total_keys)
 
   @doc """
   Returns true if the given map contains any recognized token keys with integer-like values.
   """
+  @spec token_map?(any()) :: boolean()
   def token_map?(usage) when is_map(usage) do
     Enum.any?(@all_keys, fn key ->
       !is_nil(parse_integer(Map.get(usage, key)))
