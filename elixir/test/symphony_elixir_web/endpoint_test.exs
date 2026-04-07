@@ -2,13 +2,14 @@ defmodule SymphonyElixirWeb.EndpointTest do
   use ExUnit.Case, async: false
   use Phoenix.ConnTest
 
-  @endpoint SymphonyElixirWeb.Endpoint
 
   setup do
     # Ensure any residual persistent_term state is cleared before each test
     :persistent_term.erase({SymphonyElixirWeb.Endpoint, :session_opts})
+    start_supervised!(SymphonyElixirWeb.Endpoint)
     :ok
   end
+
 
   describe "session_options/0" do
     test "returns the default session options" do
@@ -44,7 +45,7 @@ defmodule SymphonyElixirWeb.EndpointTest do
       conn = build_conn(:get, "/api/v1/state")
 
       # Pretend it was already initialized with custom opts
-      custom_init = Plug.Session.init([store: :cookie, key: "custom_key", signing_salt: "salt"])
+      custom_init = Plug.Session.init(store: :cookie, key: "custom_key", signing_salt: "salt")
       :persistent_term.put({SymphonyElixirWeb.Endpoint, :session_opts}, custom_init)
 
       # Process request through endpoint
