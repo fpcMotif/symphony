@@ -73,12 +73,9 @@ defmodule SymphonyElixir.Codex.AppServer do
         %{
           port: port,
           metadata: metadata,
-          approval_policy: approval_policy,
           auto_approve_requests: auto_approve_requests,
-          turn_sandbox_policy: turn_sandbox_policy,
-          thread_id: thread_id,
-          workspace: workspace
-        },
+          thread_id: thread_id
+        } = session,
         prompt,
         issue,
         opts \\ []
@@ -90,7 +87,7 @@ defmodule SymphonyElixir.Codex.AppServer do
         DynamicTool.execute(tool, arguments)
       end)
 
-    case start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
+    case start_turn(session, prompt, issue) do
       {:ok, turn_id} ->
         session_id = "#{thread_id}-#{turn_id}"
         Logger.info("Codex session started for #{issue_context(issue)} session_id=#{session_id}")
@@ -357,26 +354,26 @@ defmodule SymphonyElixir.Codex.AppServer do
     end
   end
 
-  defp start_turn(port, thread_id, prompt, issue, workspace, approval_policy, turn_sandbox_policy) do
-    send_message(port, %{
+  defp start_turn(session, prompt, issue) do
+    send_message(session.port, %{
       "method" => "turn/start",
       "id" => @turn_start_id,
       "params" => %{
-        "threadId" => thread_id,
+        "threadId" => session.thread_id,
         "input" => [
           %{
             "type" => "text",
             "text" => prompt
           }
         ],
-        "cwd" => workspace,
+        "cwd" => session.workspace,
         "title" => "#{issue.identifier}: #{issue.title}",
-        "approvalPolicy" => approval_policy,
-        "sandboxPolicy" => turn_sandbox_policy
+        "approvalPolicy" => session.approval_policy,
+        "sandboxPolicy" => session.turn_sandbox_policy
       }
     })
 
-    case await_response(port, @turn_start_id) do
+    case await_response(session.port, @turn_start_id) do
       {:ok, %{"turn" => %{"id" => turn_id}}} -> {:ok, turn_id}
       other -> other
     end
