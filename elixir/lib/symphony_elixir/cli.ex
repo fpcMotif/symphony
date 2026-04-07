@@ -180,11 +180,8 @@ defmodule SymphonyElixir.CLI do
         ref = Process.monitor(pid)
 
         receive do
-          {:DOWN, ^ref, :process, ^pid, reason} ->
-            case reason do
-              :normal -> System.halt(0)
-              _ -> System.halt(1)
-            end
+          {:DOWN, ^ref, :process, ^pid, :normal} -> System.halt(0)
+          {:DOWN, ^ref, :process, ^pid, _reason} -> System.halt(1)
         end
     end
   end
