@@ -16,6 +16,7 @@ defmodule SymphonyElixir.Orchestrator do
     WorkflowStore,
     Workspace
   }
+
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -1735,13 +1736,11 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp get_token_usage(usage, :total), do: TokenExtractor.extract_total(usage)
 
-
   defp running_seconds(%DateTime{} = started_at, %DateTime{} = now) do
     max(0, DateTime.diff(now, started_at, :second))
   end
 
   defp running_seconds(_started_at, _now), do: 0
-
 
   defp save_state(%State{} = state) do
     stripped_running =

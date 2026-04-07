@@ -1771,16 +1771,6 @@ defmodule SymphonyElixir.StatusDashboard do
 
   defp inline_text(other), do: other |> to_string() |> inline_text()
 
-  defp parse_integer(value) when is_integer(value), do: value
-
-  defp parse_integer(value) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {parsed, ""} -> parsed
-      _ -> nil
-    end
-  end
-
-  defp parse_integer(_value), do: nil
 
   defp token_usage_paths do
     [
