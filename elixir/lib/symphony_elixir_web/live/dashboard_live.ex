@@ -183,7 +183,6 @@ defmodule SymphonyElixirWeb.DashboardLive do
     """
   end
 
-
   defp running_session_row(assigns) do
     ~H"""
     <tr>
