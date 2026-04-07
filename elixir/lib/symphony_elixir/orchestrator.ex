@@ -363,15 +363,7 @@ defmodule SymphonyElixir.Orchestrator do
   def should_dispatch_issue_for_test(%Issue{} = issue, %State{} = state) do
     active_states = if MapSet.size(state.active_states) > 0, do: state.active_states, else: active_state_set()
     terminal_states = if MapSet.size(state.terminal_states) > 0, do: state.terminal_states, else: terminal_state_set()
-
-    running_counts =
-      Enum.reduce(state.running, %{}, fn
-        {_id, %{issue: %Issue{state: state_name}}}, acc ->
-          Map.update(acc, normalize_issue_state(state_name), 1, &(&1 + 1))
-
-        _other, acc ->
-          acc
-      end)
+    running_counts = calculate_running_counts(state.running)
 
     should_dispatch_issue?(issue, state, running_counts, active_states, terminal_states)
   end
@@ -624,15 +616,7 @@ defmodule SymphonyElixir.Orchestrator do
   defp choose_issues(issues, state) do
     active_states = state.active_states
     terminal_states = state.terminal_states
-
-    running_counts =
-      Enum.reduce(state.running, %{}, fn
-        {_id, %{issue: %Issue{state: state_name}}}, acc ->
-          Map.update(acc, normalize_issue_state(state_name), 1, &(&1 + 1))
-
-        _other, acc ->
-          acc
-      end)
+    running_counts = calculate_running_counts(state.running)
 
     {candidates, _final_state, _counts} =
       issues
@@ -728,8 +712,7 @@ defmodule SymphonyElixir.Orchestrator do
       !todo_issue_blocked_by_non_terminal?(issue, terminal_states) and
       !MapSet.member?(claimed, issue.id) and
       !Map.has_key?(running, issue.id) and
-      available_slots(state) > 0 and
-      state_slots_available?(issue, running_counts) and
+      dispatch_slots_available?(issue, state, running_counts) and
       worker_slots_available?(state)
   end
 
@@ -1082,8 +1065,10 @@ defmodule SymphonyElixir.Orchestrator do
   end
 
   defp handle_active_retry(state, issue, attempt, metadata) do
+    running_counts = calculate_running_counts(state.running)
+
     if retry_candidate_issue?(issue, state.active_states, state.terminal_states) and
-         dispatch_slots_available?(issue, state) and
+         dispatch_slots_available?(issue, state, running_counts) and
          worker_slots_available?(state, metadata[:worker_host]) do
       {:noreply, dispatch_issue(state, issue, attempt, metadata[:worker_host])}
     else
@@ -1245,6 +1230,16 @@ defmodule SymphonyElixir.Orchestrator do
         map_size(state.running),
       0
     )
+  end
+
+  defp calculate_running_counts(running) when is_map(running) do
+    Enum.reduce(running, %{}, fn
+      {_id, %{issue: %Issue{state: state_name}}}, acc ->
+        Map.update(acc, normalize_issue_state(state_name), 1, &(&1 + 1))
+
+      _other, acc ->
+        acc
+    end)
   end
 
   @spec request_refresh() :: map() | :unavailable
@@ -1464,21 +1459,9 @@ defmodule SymphonyElixir.Orchestrator do
       !todo_issue_blocked_by_non_terminal?(issue, terminal_states)
   end
 
-  defp dispatch_slots_available?(%Issue{} = issue, %State{} = state) do
-    if available_slots(state) > 0 do
-      running_counts =
-        Enum.reduce(state.running, %{}, fn
-          {_id, %{issue: %Issue{state: state_name}}}, acc ->
-            Map.update(acc, normalize_issue_state(state_name), 1, &(&1 + 1))
-
-          _other, acc ->
-            acc
-        end)
-
-      state_slots_available?(issue, running_counts)
-    else
-      false
-    end
+  defp dispatch_slots_available?(%Issue{} = issue, %State{} = state, running_counts)
+       when is_map(running_counts) do
+    available_slots(state) > 0 and state_slots_available?(issue, running_counts)
   end
 
   defp apply_codex_token_delta(
