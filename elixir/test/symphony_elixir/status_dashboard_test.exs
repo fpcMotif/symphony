@@ -28,8 +28,7 @@ defmodule SymphonyElixir.StatusDashboardTest do
     assert StatusDashboard.rolling_tps([], now_ms, 100) == 0.0
     assert StatusDashboard.rolling_tps([{now_ms, 100}], now_ms, 100) == 0.0
 
-    assert {second, 12.5} =
-             StatusDashboard.throttled_tps(div(now_ms, 1000), 12.5, now_ms, [{now_ms - 1_000, 100}], 200)
+    assert {second, 12.5} = StatusDashboard.throttled_tps(div(now_ms, 1000), 12.5, now_ms, [{now_ms - 1_000, 100}], 200)
 
     assert second == div(now_ms, 1000)
   end

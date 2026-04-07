@@ -159,11 +159,9 @@ defmodule SymphonyElixir.TrackerContractTest do
 
       assert {:error, {:invalid_adapter_response, :fetch_candidate_issues}} = Tracker.fetch_candidate_issues()
 
-      assert {:error, {:invalid_adapter_response, :fetch_issues_by_states}} =
-               Tracker.fetch_issues_by_states(["Todo"])
+      assert {:error, {:invalid_adapter_response, :fetch_issues_by_states}} = Tracker.fetch_issues_by_states(["Todo"])
 
-      assert {:error, {:invalid_adapter_response, :fetch_issue_states_by_ids}} =
-               Tracker.fetch_issue_states_by_ids(["issue-1"])
+      assert {:error, {:invalid_adapter_response, :fetch_issue_states_by_ids}} = Tracker.fetch_issue_states_by_ids(["issue-1"])
 
       assert {:error, :comment_create_failed} = Tracker.create_comment("issue-1", "body")
       assert {:error, :state_not_found} = Tracker.update_issue_state("issue-1", "Done")
@@ -191,11 +189,9 @@ defmodule SymphonyElixir.TrackerContractTest do
         SymphonyElixir.TrackerContractInvalidAdapterStub
       )
 
-      assert {:error, {:invalid_adapter_response, :create_comment}} =
-               Tracker.create_comment("issue-1", "body")
+      assert {:error, {:invalid_adapter_response, :create_comment}} = Tracker.create_comment("issue-1", "body")
 
-      assert {:error, {:invalid_adapter_response, :update_issue_state}} =
-               Tracker.update_issue_state("issue-1", "Done")
+      assert {:error, {:invalid_adapter_response, :update_issue_state}} = Tracker.update_issue_state("issue-1", "Done")
     end
   end
 end

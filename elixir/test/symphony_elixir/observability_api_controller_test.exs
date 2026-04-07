@@ -36,8 +36,7 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
   test "serves state, issue, and refresh payloads over HTTP" do
     orchestrator_name = Module.concat(__MODULE__, :HappyPathOrchestrator)
 
-    orchestrator_spec =
-      {StaticOrchestrator, name: orchestrator_name, snapshot: snapshot_fixture(), refresh: refresh_fixture()}
+    orchestrator_spec = {StaticOrchestrator, name: orchestrator_name, snapshot: snapshot_fixture(), refresh: refresh_fixture()}
 
     start_supervised!(orchestrator_spec)
 
@@ -73,8 +72,7 @@ defmodule SymphonyElixir.ObservabilityApiControllerTest do
   test "returns orchestrator_unavailable when refresh cannot be queued" do
     orchestrator_name = Module.concat(__MODULE__, :RefreshUnavailableOrchestrator)
 
-    orchestrator_spec =
-      {StaticOrchestrator, name: orchestrator_name, snapshot: snapshot_fixture(), refresh: :unavailable}
+    orchestrator_spec = {StaticOrchestrator, name: orchestrator_name, snapshot: snapshot_fixture(), refresh: :unavailable}
 
     start_supervised!(orchestrator_spec)
 

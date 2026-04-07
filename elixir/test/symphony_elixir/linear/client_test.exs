@@ -433,8 +433,7 @@ defmodule SymphonyElixir.Linear.ClientTest do
     end
 
     test "returns error when has_next_page is true but end_cursor is empty" do
-      assert {:error, :linear_missing_end_cursor} =
-               Client.next_page_cursor_for_test(%{has_next_page: true, end_cursor: ""})
+      assert {:error, :linear_missing_end_cursor} = Client.next_page_cursor_for_test(%{has_next_page: true, end_cursor: ""})
     end
   end
 
@@ -481,8 +480,7 @@ defmodule SymphonyElixir.Linear.ClientTest do
 
       write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: "test-token")
 
-      assert {:ok, %{"data" => %{"viewer" => %{"id" => "user-1"}}}} =
-               Client.graphql("query { viewer { id } }", %{}, request_fun: request_fun)
+      assert {:ok, %{"data" => %{"viewer" => %{"id" => "user-1"}}}} = Client.graphql("query { viewer { id } }", %{}, request_fun: request_fun)
     end
 
     test "returns error on non-200 status" do
@@ -494,8 +492,7 @@ defmodule SymphonyElixir.Linear.ClientTest do
 
       log =
         capture_log(fn ->
-          assert {:error, {:linear_api_status, 401}} =
-                   Client.graphql("query { viewer { id } }", %{}, request_fun: request_fun)
+          assert {:error, {:linear_api_status, 401}} = Client.graphql("query { viewer { id } }", %{}, request_fun: request_fun)
         end)
 
       assert log =~ "Linear GraphQL request failed status=401"
@@ -510,8 +507,7 @@ defmodule SymphonyElixir.Linear.ClientTest do
 
       log =
         capture_log(fn ->
-          assert {:error, {:linear_api_request, :timeout}} =
-                   Client.graphql("query { viewer { id } }", %{}, request_fun: request_fun)
+          assert {:error, {:linear_api_request, :timeout}} = Client.graphql("query { viewer { id } }", %{}, request_fun: request_fun)
         end)
 
       assert log =~ "Linear GraphQL request failed"
@@ -520,8 +516,7 @@ defmodule SymphonyElixir.Linear.ClientTest do
     test "returns error when API token is missing" do
       write_workflow_file!(Workflow.workflow_file_path(), tracker_api_token: nil)
 
-      assert {:error, {:linear_api_request, :missing_linear_api_token}} =
-               Client.graphql("query { viewer { id } }", %{})
+      assert {:error, {:linear_api_request, :missing_linear_api_token}} = Client.graphql("query { viewer { id } }", %{})
     end
   end
 
