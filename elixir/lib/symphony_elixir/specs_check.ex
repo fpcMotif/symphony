@@ -71,10 +71,12 @@ defmodule SymphonyElixir.SpecsCheck do
   end
 
   defp find_missing_specs(body, module_name, file, exemptions) do
+    env = %{module: module_name, file: file, exemptions: exemptions}
+
     body
     |> normalize_block()
     |> Enum.reduce(initial_state(), fn form, state ->
-      consume_form(form, state, module_name, file, exemptions)
+      consume_form(form, state, env)
     end)
     |> Map.fetch!(:findings)
   end
@@ -83,7 +85,7 @@ defmodule SymphonyElixir.SpecsCheck do
     %{pending_specs: MapSet.new(), pending_impl: false, seen_defs: MapSet.new(), findings: []}
   end
 
-  defp consume_form({:@, _, [{:spec, _, spec_nodes}]}, state, _module_name, _file, _exemptions) do
+  defp consume_form({:@, _, [{:spec, _, spec_nodes}]}, state, _env) do
     ids =
       spec_nodes
       |> Enum.flat_map(&extract_spec_identifiers/1)
@@ -92,13 +94,13 @@ defmodule SymphonyElixir.SpecsCheck do
     %{state | pending_specs: MapSet.union(state.pending_specs, ids)}
   end
 
-  defp consume_form({:@, _, [{:impl, _, _}]}, state, _module_name, _file, _exemptions) do
+  defp consume_form({:@, _, [{:impl, _, _}]}, state, _env) do
     %{state | pending_impl: true}
   end
 
-  defp consume_form({:@, _, _}, state, _module_name, _file, _exemptions), do: state
+  defp consume_form({:@, _, _}, state, _env), do: state
 
-  defp consume_form({:def, meta, [head_ast, _]} = _form, state, module_name, file, exemptions) do
+  defp consume_form({:def, meta, [head_ast, _]} = _form, state, env) do
     {name, arity} = def_head_to_identifier(head_ast)
 
     id = {name, arity}
@@ -107,8 +109,8 @@ defmodule SymphonyElixir.SpecsCheck do
       %{state | pending_specs: MapSet.new(), pending_impl: false}
     else
       finding = %{
-        file: file,
-        module: module_name,
+        file: env.file,
+        module: env.module,
         name: name,
         arity: arity,
         line: Keyword.get(meta, :line, 1)
@@ -121,7 +123,7 @@ defmodule SymphonyElixir.SpecsCheck do
           seen_defs: MapSet.put(state.seen_defs, id)
       }
 
-      if compliant?(finding, state, exemptions) do
+      if compliant?(finding, state, env.exemptions) do
         next_state
       else
         %{next_state | findings: [finding | next_state.findings]}
@@ -129,11 +131,11 @@ defmodule SymphonyElixir.SpecsCheck do
     end
   end
 
-  defp consume_form({:defp, _, _}, state, _module_name, _file, _exemptions) do
+  defp consume_form({:defp, _, _}, state, _env) do
     %{state | pending_specs: MapSet.new(), pending_impl: false}
   end
 
-  defp consume_form(_form, state, _module_name, _file, _exemptions) do
+  defp consume_form(_form, state, _env) do
     %{state | pending_specs: MapSet.new(), pending_impl: false}
   end
 
