@@ -60,8 +60,7 @@ defmodule SymphonyElixir.HttpServer do
     :exit, _reason -> nil
   end
 
-  defp parse_host({_, _, _, _} = ip), do: {:ok, ip}
-  defp parse_host({_, _, _, _, _, _, _, _} = ip), do: {:ok, ip}
+  defp parse_host(ip) when is_tuple(ip) and tuple_size(ip) in [4, 8], do: {:ok, ip}
 
   defp parse_host(host) when host in ["", nil], do: {:ok, {127, 0, 0, 1}}
 
@@ -82,8 +81,7 @@ defmodule SymphonyElixir.HttpServer do
 
   defp normalize_host(host) when host in ["", nil], do: "127.0.0.1"
   defp normalize_host(host) when is_binary(host), do: host
-  defp normalize_host({_, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
-  defp normalize_host({_, _, _, _, _, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
+  defp normalize_host(ip) when is_tuple(ip) and tuple_size(ip) in [4, 8], do: ip |> :inet.ntoa() |> to_string()
 
   defp secret_key_base do
     System.get_env("SECRET_KEY_BASE") ||
