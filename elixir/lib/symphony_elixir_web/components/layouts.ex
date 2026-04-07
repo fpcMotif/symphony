@@ -20,22 +20,7 @@ defmodule SymphonyElixirWeb.Layouts do
         <script defer src="/vendor/phoenix_html/phoenix_html.js"></script>
         <script defer src="/vendor/phoenix/phoenix.js"></script>
         <script defer src="/vendor/phoenix_live_view/phoenix_live_view.js"></script>
-        <script>
-          window.addEventListener("DOMContentLoaded", function () {
-            var csrfToken = document
-              .querySelector("meta[name='csrf-token']")
-              ?.getAttribute("content");
-
-            if (!window.Phoenix || !window.LiveView) return;
-
-            var liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
-              params: {_csrf_token: csrfToken}
-            });
-
-            liveSocket.connect();
-            window.liveSocket = liveSocket;
-          });
-        </script>
+        <.live_socket_scripts />
         <link rel="stylesheet" href="/dashboard.css" />
       </head>
       <body>
@@ -51,6 +36,27 @@ defmodule SymphonyElixirWeb.Layouts do
     <main class="app-shell">
       {@inner_content}
     </main>
+    """
+  end
+
+  defp live_socket_scripts(assigns) do
+    ~H"""
+    <script>
+      window.addEventListener("DOMContentLoaded", function () {
+        var csrfToken = document
+          .querySelector("meta[name='csrf-token']")
+          ?.getAttribute("content");
+
+        if (!window.Phoenix || !window.LiveView) return;
+
+        var liveSocket = new window.LiveView.LiveSocket("/live", window.Phoenix.Socket, {
+          params: {_csrf_token: csrfToken}
+        });
+
+        liveSocket.connect();
+        window.liveSocket = liveSocket;
+      });
+    </script>
     """
   end
 end
