@@ -887,24 +887,29 @@ defmodule SymphonyElixir.StatusDashboard do
         {end_ms, tps}
       end)
 
-    bucketed_tps =
-      0..(@throughput_graph_columns - 1)
-      |> Enum.map(fn bucket_idx ->
-        bucket_start = graph_window_start + bucket_idx * bucket_ms
-        bucket_end = bucket_start + bucket_ms
-        last_bucket? = bucket_idx == @throughput_graph_columns - 1
+    bucket_sums =
+      Enum.reduce(rates, %{}, fn {timestamp, tps}, acc ->
+        idx =
+          if timestamp < graph_window_start do
+            -1
+          else
+            div(timestamp - graph_window_start, bucket_ms)
+          end
 
-        values =
-          rates
-          |> Enum.filter(fn {timestamp, _tps} ->
-            in_bucket?(timestamp, bucket_start, bucket_end, last_bucket?)
-          end)
-          |> Enum.map(fn {_timestamp, tps} -> tps end)
+        idx = if idx == @throughput_graph_columns, do: @throughput_graph_columns - 1, else: idx
 
-        if values == [] do
-          0.0
+        if idx >= 0 and idx < @throughput_graph_columns do
+          Map.update(acc, idx, {tps, 1}, fn {sum, count} -> {sum + tps, count + 1} end)
         else
-          Enum.sum(values) / length(values)
+          acc
+        end
+      end)
+
+    bucketed_tps =
+      Enum.map(0..(@throughput_graph_columns - 1), fn idx ->
+        case Map.get(bucket_sums, idx) do
+          nil -> 0.0
+          {sum, count} -> sum / count
         end
       end)
 
@@ -922,12 +927,6 @@ defmodule SymphonyElixir.StatusDashboard do
       Enum.at(@sparkline_blocks, index, "▁")
     end)
   end
-
-  defp in_bucket?(timestamp, bucket_start, bucket_end, true),
-    do: timestamp >= bucket_start and timestamp <= bucket_end
-
-  defp in_bucket?(timestamp, bucket_start, bucket_end, false),
-    do: timestamp >= bucket_start and timestamp < bucket_end
 
   defp format_rate_limits(nil), do: colorize("unavailable", @ansi_gray)
 
