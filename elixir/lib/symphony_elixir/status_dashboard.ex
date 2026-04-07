@@ -6,7 +6,7 @@ defmodule SymphonyElixir.StatusDashboard do
   use GenServer
   require Logger
 
-  alias SymphonyElixir.{Config, HttpServer}
+  alias SymphonyElixir.{Config, HttpServer, TokenExtractor}
   alias SymphonyElixir.Orchestrator
   alias SymphonyElixirWeb.ObservabilityPubSub
 
@@ -1571,45 +1571,9 @@ defmodule SymphonyElixir.StatusDashboard do
   end
 
   defp format_usage_counts(usage) when is_map(usage) do
-    input =
-      parse_integer(
-        map_value(usage, [
-          "input_tokens",
-          :input_tokens,
-          "prompt_tokens",
-          :prompt_tokens,
-          "inputTokens",
-          :inputTokens,
-          "promptTokens",
-          :promptTokens
-        ])
-      )
-
-    output =
-      parse_integer(
-        map_value(usage, [
-          "output_tokens",
-          :output_tokens,
-          "completion_tokens",
-          :completion_tokens,
-          "outputTokens",
-          :outputTokens,
-          "completionTokens",
-          :completionTokens
-        ])
-      )
-
-    total =
-      parse_integer(
-        map_value(usage, [
-          "total_tokens",
-          :total_tokens,
-          "total",
-          :total,
-          "totalTokens",
-          :totalTokens
-        ])
-      )
+    input = TokenExtractor.extract_input(usage)
+    output = TokenExtractor.extract_output(usage)
+    total = TokenExtractor.extract_total(usage)
 
     parts =
       []

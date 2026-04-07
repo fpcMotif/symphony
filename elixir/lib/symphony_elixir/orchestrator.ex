@@ -7,7 +7,15 @@ defmodule SymphonyElixir.Orchestrator do
   require Logger
   import Bitwise, only: [<<<: 2]
 
-  alias SymphonyElixir.{AgentRunner, Config, StatusDashboard, Tracker, WorkflowStore, Workspace}
+  alias SymphonyElixir.{
+    AgentRunner,
+    Config,
+    StatusDashboard,
+    TokenExtractor,
+    Tracker,
+    WorkflowStore,
+    Workspace
+  }
   alias SymphonyElixir.Linear.Issue
 
   @continuation_retry_delay_ms 1_000
@@ -1719,91 +1727,14 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp map_at_path(_payload, _path), do: nil
 
-  defp integer_token_map?(payload) do
-    token_fields = [
-      :input_tokens,
-      :output_tokens,
-      :total_tokens,
-      :prompt_tokens,
-      :completion_tokens,
-      :inputTokens,
-      :outputTokens,
-      :totalTokens,
-      :promptTokens,
-      :completionTokens,
-      "input_tokens",
-      "output_tokens",
-      "total_tokens",
-      "prompt_tokens",
-      "completion_tokens",
-      "inputTokens",
-      "outputTokens",
-      "totalTokens",
-      "promptTokens",
-      "completionTokens"
-    ]
+  defp integer_token_map?(payload), do: TokenExtractor.token_map?(payload)
 
-    token_fields
-    |> Enum.any?(fn field ->
-      value = payload_get(payload, field)
-      !is_nil(integer_like(value))
-    end)
-  end
+  defp get_token_usage(usage, :input), do: TokenExtractor.extract_input(usage)
 
-  defp get_token_usage(usage, :input),
-    do:
-      payload_get(usage, [
-        "input_tokens",
-        "prompt_tokens",
-        :input_tokens,
-        :prompt_tokens,
-        :input,
-        "promptTokens",
-        :promptTokens,
-        "inputTokens",
-        :inputTokens
-      ])
+  defp get_token_usage(usage, :output), do: TokenExtractor.extract_output(usage)
 
-  defp get_token_usage(usage, :output),
-    do:
-      payload_get(usage, [
-        "output_tokens",
-        "completion_tokens",
-        :output_tokens,
-        :completion_tokens,
-        :output,
-        :completion,
-        "outputTokens",
-        :outputTokens,
-        "completionTokens",
-        :completionTokens
-      ])
+  defp get_token_usage(usage, :total), do: TokenExtractor.extract_total(usage)
 
-  defp get_token_usage(usage, :total),
-    do:
-      payload_get(usage, [
-        "total_tokens",
-        "total",
-        :total_tokens,
-        :total,
-        "totalTokens",
-        :totalTokens
-      ])
-
-  defp payload_get(payload, fields) when is_list(fields) do
-    Enum.find_value(fields, fn field -> map_integer_value(payload, field) end)
-  end
-
-  defp payload_get(payload, field), do: map_integer_value(payload, field)
-
-  defp map_integer_value(payload, field) do
-    if is_map(payload) do
-      value = Map.get(payload, field)
-      integer_like(value)
-    else
-      nil
-    end
-  end
 
   defp running_seconds(%DateTime{} = started_at, %DateTime{} = now) do
     max(0, DateTime.diff(now, started_at, :second))
@@ -1811,16 +1742,6 @@ defmodule SymphonyElixir.Orchestrator do
 
   defp running_seconds(_started_at, _now), do: 0
 
-  defp integer_like(value) when is_integer(value) and value >= 0, do: value
-
-  defp integer_like(value) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {num, _} when num >= 0 -> num
-      _ -> nil
-    end
-  end
-
-  defp integer_like(_value), do: nil
 
   defp save_state(%State{} = state) do
     stripped_running =
