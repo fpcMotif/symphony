@@ -3,6 +3,26 @@ defmodule SymphonyElixir.AgentRunner do
   Executes a single Linear issue in its workspace with Codex.
   """
 
+  defmodule TurnContext do
+    @moduledoc false
+    @enforce_keys [
+      :app_session,
+      :workspace,
+      :codex_update_recipient,
+      :opts,
+      :issue_state_fetcher,
+      :max_turns
+    ]
+    defstruct [
+      :app_session,
+      :workspace,
+      :codex_update_recipient,
+      :opts,
+      :issue_state_fetcher,
+      :max_turns
+    ]
+  end
+
   require Logger
   alias SymphonyElixir.Codex.AppServer
   alias SymphonyElixir.{Config, Linear.Issue, PromptBuilder, Tracker, Workspace}
@@ -97,15 +117,33 @@ defmodule SymphonyElixir.AgentRunner do
     issue_state_fetcher = Keyword.get(opts, :issue_state_fetcher, &Tracker.fetch_issue_states_by_ids/1)
 
     with {:ok, session} <- AppServer.start_session(workspace, worker_host: worker_host) do
+      context = %__MODULE__.TurnContext{
+        app_session: session,
+        workspace: workspace,
+        codex_update_recipient: codex_update_recipient,
+        opts: opts,
+        issue_state_fetcher: issue_state_fetcher,
+        max_turns: max_turns
+      }
+
       try do
-        do_run_codex_turns(session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, 1, max_turns)
+        do_run_codex_turns(context, issue, 1)
       after
         AppServer.stop_session(session)
       end
     end
   end
 
-  defp do_run_codex_turns(app_session, workspace, issue, codex_update_recipient, opts, issue_state_fetcher, turn_number, max_turns) do
+  defp do_run_codex_turns(context, issue, turn_number) do
+    %{
+      app_session: app_session,
+      workspace: workspace,
+      codex_update_recipient: codex_update_recipient,
+      opts: opts,
+      issue_state_fetcher: issue_state_fetcher,
+      max_turns: max_turns
+    } = context
+
     prompt = build_turn_prompt(issue, opts, turn_number, max_turns)
 
     with {:ok, turn_session} <-
@@ -122,14 +160,9 @@ defmodule SymphonyElixir.AgentRunner do
           Logger.info("Continuing agent run for #{issue_context(refreshed_issue)} after normal turn completion turn=#{turn_number}/#{max_turns}")
 
           do_run_codex_turns(
-            app_session,
-            workspace,
+            context,
             refreshed_issue,
-            codex_update_recipient,
-            opts,
-            issue_state_fetcher,
-            turn_number + 1,
-            max_turns
+            turn_number + 1
           )
 
         {:continue, refreshed_issue} ->
