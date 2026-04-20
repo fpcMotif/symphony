@@ -61,7 +61,8 @@ defmodule SymphonyElixir.Tracker do
 
     Application.get_env(:symphony_elixir, :tracker_adapter_module) ||
       case settings.tracker.kind do
-        "memory" -> SymphonyElixir.Tracker.Memory
+        "memory" ->
+          SymphonyElixir.Tracker.Memory
 
         "custom" ->
           module_name = "Elixir." <> settings.tracker.adapter_module
