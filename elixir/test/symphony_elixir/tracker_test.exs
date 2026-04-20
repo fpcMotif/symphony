@@ -36,4 +36,19 @@ defmodule SymphonyElixir.TrackerTest do
       assert {:error, :service_unavailable} = Tracker.fetch_candidate_issues()
     end
   end
+
+  describe "adapter/0" do
+    test "raises ArgumentError when custom adapter module does not exist" do
+      workflow_file = Workflow.workflow_file_path()
+
+      write_workflow_file!(workflow_file,
+        tracker_kind: "custom",
+        tracker_adapter_module: "NonExistentModule"
+      )
+
+      assert_raise ArgumentError, ~r/Tracker adapter module Elixir.NonExistentModule does not exist/, fn ->
+        Tracker.adapter()
+      end
+    end
+  end
 end
