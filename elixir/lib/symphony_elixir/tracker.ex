@@ -70,8 +70,10 @@ defmodule SymphonyElixir.Tracker do
           try do
             String.to_existing_atom(module_name)
           rescue
-            ArgumentError ->
-              raise ArgumentError, "Tracker adapter module #{module_name} does not exist"
+            _ ->
+              reraise ArgumentError,
+                      "Tracker adapter module #{module_name} does not exist",
+                      __STACKTRACE__
           end
 
         _ ->
