@@ -174,62 +174,68 @@ defmodule SymphonyElixirWeb.DashboardLive do
               </tr>
             </thead>
             <tbody>
-              <tr :for={entry <- @payload.running}>
-                <td>
-                  <div class="issue-stack">
-                    <span class="issue-id"><%= entry.issue_identifier %></span>
-                    <a class="issue-link" href={"/api/v1/#{entry.issue_identifier}"}>JSON details</a>
-                  </div>
-                </td>
-                <td>
-                  <span class={state_badge_class(entry.state)}>
-                    <%= entry.state %>
-                  </span>
-                </td>
-                <td>
-                  <div class="session-stack">
-                    <%= if entry.session_id do %>
-                      <button
-                        type="button"
-                        class="subtle-button"
-                        data-label="Copy ID"
-                        data-copy={entry.session_id}
-                        onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
-                      >
-                        Copy ID
-                      </button>
-                    <% else %>
-                      <span class="muted">n/a</span>
-                    <% end %>
-                  </div>
-                </td>
-                <td class="numeric"><%= format_runtime_and_turns(entry.started_at, entry.turn_count, @now) %></td>
-                <td>
-                  <div class="detail-stack">
-                    <span
-                      class="event-text"
-                      title={entry.last_message || to_string(entry.last_event || "n/a")}
-                    ><%= entry.last_message || to_string(entry.last_event || "n/a") %></span>
-                    <span class="muted event-meta">
-                      <%= entry.last_event || "n/a" %>
-                      <%= if entry.last_event_at do %>
-                        · <span class="mono numeric"><%= entry.last_event_at %></span>
-                      <% end %>
-                    </span>
-                  </div>
-                </td>
-                <td>
-                  <div class="token-stack numeric">
-                    <span>Total: <%= format_int(entry.tokens.total_tokens) %></span>
-                    <span class="muted">In <%= format_int(entry.tokens.input_tokens) %> / Out <%= format_int(entry.tokens.output_tokens) %></span>
-                  </div>
-                </td>
-              </tr>
+              <.running_session_row :for={entry <- @payload.running} entry={entry} now={@now} />
             </tbody>
           </table>
         </div>
       <% end %>
     </section>
+    """
+  end
+
+  defp running_session_row(assigns) do
+    ~H"""
+    <tr>
+      <td>
+        <div class="issue-stack">
+          <span class="issue-id"><%= @entry.issue_identifier %></span>
+          <a class="issue-link" href={"/api/v1/#{@entry.issue_identifier}"}>JSON details</a>
+        </div>
+      </td>
+      <td>
+        <span class={state_badge_class(@entry.state)}>
+          <%= @entry.state %>
+        </span>
+      </td>
+      <td>
+        <div class="session-stack">
+          <%= if @entry.session_id do %>
+            <button
+              type="button"
+              class="subtle-button"
+              data-label="Copy ID"
+              data-copy={@entry.session_id}
+              onclick="navigator.clipboard.writeText(this.dataset.copy); this.textContent = 'Copied'; clearTimeout(this._copyTimer); this._copyTimer = setTimeout(() => { this.textContent = this.dataset.label }, 1200);"
+            >
+              Copy ID
+            </button>
+          <% else %>
+            <span class="muted">n/a</span>
+          <% end %>
+        </div>
+      </td>
+      <td class="numeric"><%= format_runtime_and_turns(@entry.started_at, @entry.turn_count, @now) %></td>
+      <td>
+        <div class="detail-stack">
+          <span
+            class="event-text"
+            title={@entry.last_message || to_string(@entry.last_event || "n/a")}
+          ><%= @entry.last_message || to_string(@entry.last_event || "n/a") %></span>
+          <span class="muted event-meta">
+            <%= @entry.last_event || "n/a" %>
+            <%= if @entry.last_event_at do %>
+              · <span class="mono numeric"><%= @entry.last_event_at %></span>
+            <% end %>
+          </span>
+        </div>
+      </td>
+      <td>
+        <div class="token-stack numeric">
+          <span>Total: <%= format_int(@entry.tokens.total_tokens) %></span>
+          <span class="muted">In <%= format_int(@entry.tokens.input_tokens) %> / Out <%= format_int(@entry.tokens.output_tokens) %></span>
+        </div>
+      </td>
+    </tr>
     """
   end
 
