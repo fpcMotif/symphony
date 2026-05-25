@@ -891,24 +891,18 @@ defmodule SymphonyElixir.StatusDashboard do
         {end_ms, tps}
       end)
 
+    bucket_sums =
+      Enum.reduce(
+        rates,
+        %{},
+        &aggregate_bucket_sums(&1, &2, graph_window_start, bucket_ms)
+      )
+
     bucketed_tps =
-      0..(@throughput_graph_columns - 1)
-      |> Enum.map(fn bucket_idx ->
-        bucket_start = graph_window_start + bucket_idx * bucket_ms
-        bucket_end = bucket_start + bucket_ms
-        last_bucket? = bucket_idx == @throughput_graph_columns - 1
-
-        values =
-          rates
-          |> Enum.filter(fn {timestamp, _tps} ->
-            in_bucket?(timestamp, bucket_start, bucket_end, last_bucket?)
-          end)
-          |> Enum.map(fn {_timestamp, tps} -> tps end)
-
-        if values == [] do
-          0.0
-        else
-          Enum.sum(values) / length(values)
+      Enum.map(0..(@throughput_graph_columns - 1), fn idx ->
+        case Map.get(bucket_sums, idx) do
+          nil -> 0.0
+          {sum, count} -> sum / count
         end
       end)
 
@@ -927,11 +921,22 @@ defmodule SymphonyElixir.StatusDashboard do
     end)
   end
 
-  defp in_bucket?(timestamp, bucket_start, bucket_end, true),
-    do: timestamp >= bucket_start and timestamp <= bucket_end
+  defp aggregate_bucket_sums({timestamp, tps}, acc, graph_window_start, bucket_ms) do
+    idx =
+      if timestamp < graph_window_start do
+        -1
+      else
+        div(timestamp - graph_window_start, bucket_ms)
+      end
 
-  defp in_bucket?(timestamp, bucket_start, bucket_end, false),
-    do: timestamp >= bucket_start and timestamp < bucket_end
+    idx = if idx == @throughput_graph_columns, do: @throughput_graph_columns - 1, else: idx
+
+    if idx >= 0 and idx < @throughput_graph_columns do
+      Map.update(acc, idx, {tps, 1}, fn {sum, count} -> {sum + tps, count + 1} end)
+    else
+      acc
+    end
+  end
 
   defp format_rate_limits(nil), do: colorize("unavailable", @ansi_gray)
 
